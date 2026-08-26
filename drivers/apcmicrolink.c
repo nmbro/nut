@@ -2801,10 +2801,31 @@ static int microlink_start_session_impl(unsigned int max_attempts)
 	rxbuf_len = 0;
 	poll_primed = 0;
 	authentication_sent = 0;
-	memset(&page0, 0, sizeof(page0));
-	descriptor_ready = 0;
-	descriptor_usage_count = 0;
-	descriptor_blob_len = 0;
+
+	/* Deliberately NOT resetting page0/descriptor_ready/descriptor_usage_count/
+	 * descriptor_blob_len here: this function runs on every (re)connect
+	 * attempt, not just the process's first-ever session, and wiping page0
+	 * on every one of those was a real bug, not just a missed optimization.
+	 * microlink_try_extract_frame_at() only uses the raw-byte-derived
+	 * sourcebuf[2] to compute frame length the *first* time
+	 * MLINK_OBJ_PROTOCOL is ever seen (objects[] - and so ->seen - is reset
+	 * exactly once, in upsdrv_initinfo() at process start, never again);
+	 * every later call falls through to trusting the cached page0.width
+	 * instead. Zeroing page0 here left ->seen permanently true while
+	 * page0.width kept getting reset to 0 on every reconnect after the
+	 * first successful one in a process's life, making every frame-length
+	 * calculation come out as 0+3=3 - a "frame" too short to ever pass
+	 * checksum validation. The device kept replying correctly the whole
+	 * time (confirmed live via USB capture); we were the ones who could
+	 * never parse another reply again for the rest of that process's
+	 * lifetime, silently, with no error - explains why only a full driver
+	 * *process* restart (not a reconnect, not even a USB hard reset) ever
+	 * recovered a stuck session in testing. page0's fields are static
+	 * device/firmware properties that don't change across a reconnect to
+	 * the same physical device, and microlink_cache_object() already
+	 * refreshes them from any freshly-received page0 frame regardless of
+	 * whether they were already populated - so preserving the old values
+	 * here costs nothing and only helps parsing survive the gap. */
 
 #ifdef WITH_USB
 	if (is_usb) {
