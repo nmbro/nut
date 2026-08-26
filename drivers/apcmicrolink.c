@@ -261,6 +261,20 @@ static const char *const outlet_suffixes[] = {
  * mixed into the same series) - "hid_fallback=no" opts back out to the
  * original behavior. */
 static int hid_fallback_enabled = 1;
+
+/* Whether to actually perform a USB device reset (microlink_usb_reset_and_
+ * reopen()) once MLINK_USB_RESET_AFTER_RETRIES consecutive failed retries
+ * have piled up, vs. just retrying microlink_start_session_impl() again in
+ * place. USB-only; defaults on (unchanged behavior). Added while
+ * investigating whether the reset is actually recovering anything: live
+ * capture during a "stuck" session showed the device still emitting valid,
+ * correctly-sized 0x89 tunnel reports on the wire well after resets that
+ * supposedly failed to help, suggesting the resets may be irrelevant (or
+ * actively unhelpful, e.g. by dropping/racing whatever partial protocol
+ * state was mid-flight) rather than the device having genuinely gone deaf.
+ * "usb_reset_on_stall=no" disables the reset call for that comparison. */
+static int usb_reset_on_stall_enabled = 1;
+
 typedef enum microlink_command_source_e {
 	MLINK_CMD_SOURCE_RJ45 = 0,
 	MLINK_CMD_SOURCE_USB,
@@ -540,6 +554,20 @@ static void microlink_read_config(void)
 			hid_fallback_enabled = parsed;
 		} else {
 			fatalx(EXIT_FAILURE, "apcmicrolink: invalid hid_fallback value '%s'",
+				value);
+		}
+	}
+
+	if (testvar("usb_reset_on_stall")) {
+		int parsed = 0;
+
+		value = getval("usb_reset_on_stall");
+		if (value == NULL) {
+			usb_reset_on_stall_enabled = 1;
+		} else if (microlink_parse_bool(value, &parsed)) {
+			usb_reset_on_stall_enabled = parsed;
+		} else {
+			fatalx(EXIT_FAILURE, "apcmicrolink: invalid usb_reset_on_stall value '%s'",
 				value);
 		}
 	}
@@ -2600,9 +2628,12 @@ static int microlink_try_extract_frame(unsigned char *frame, size_t *framelen)
 	}
 	
 	if (rxbuf_len >= sizeof(rxbuf)) {
+		size_t drop_len = rxbuf_len - (MLINK_RECORD_LEN - 1);
+
 		upsdebugx(1, "microlink: dropping %u bytes while resynchronizing",
-			(unsigned int)(rxbuf_len - (MLINK_RECORD_LEN - 1)));
-		memmove(rxbuf, rxbuf + (rxbuf_len - (MLINK_RECORD_LEN - 1)), MLINK_RECORD_LEN - 1);
+			(unsigned int)drop_len);
+		microlink_trace_frame(1, "dropped (resync)", rxbuf, drop_len);
+		memmove(rxbuf, rxbuf + drop_len, MLINK_RECORD_LEN - 1);
 		rxbuf_len = MLINK_RECORD_LEN - 1;
 	}
 
@@ -2662,9 +2693,19 @@ static int microlink_authenticate(void)
 	s0 = protocol->data[4];
 	s1 = protocol->data[3];
 
+	upsdebugx(3, "microlink: auth seed s0=%02X (protocol[4]) s1=%02X (protocol[3])",
+		s0, s1);
+	microlink_trace_frame(3, "auth protocol[0:8]", protocol->data, 8);
+	microlink_trace_frame(3, "auth serial_usage bytes", descriptor_blob + serial_usage->data_offset,
+		serial_usage->size);
+	microlink_trace_frame(3, "auth master_password[0:2] (only first 2 used)", master_password, 2);
+
 	microlink_auth_update(&s0, &s1, protocol->data, 8);
+	upsdebugx(3, "microlink: auth after protocol header: s0=%02X s1=%02X", s0, s1);
 	microlink_auth_update(&s0, &s1, descriptor_blob + serial_usage->data_offset, serial_usage->size);
+	upsdebugx(3, "microlink: auth after serial number: s0=%02X s1=%02X", s0, s1);
 	microlink_auth_update(&s0, &s1, master_password, 2);
+	upsdebugx(3, "microlink: auth after master_password: s0=%02X s1=%02X (-> SPC[2:4])", s0, s1);
 
 	/* SPC[0:2]: our own challenge. APC's own PowerChute client draws this
 	 * from a real random source - a fixed 0x00 0x00 here made the exchange
@@ -2681,6 +2722,7 @@ static int microlink_authenticate(void)
 
 	upsdebugx(1, "microlink: STABILITY auth_sent %02X %02X",
 		payload[2], payload[3]);
+	microlink_trace_frame(1, "auth SLAVE_PASSWORD payload (SPC[0:4])", payload, sizeof(payload));
 
 	return microlink_send_descriptor_write(
 		MLINK_DESC_SLAVE_PASSWORD,
@@ -3321,15 +3363,24 @@ void upsdrv_updateinfo(void)
 
 #ifdef WITH_USB
 		if (microlink_fallback_retries >= MLINK_USB_RESET_AFTER_RETRIES) {
-			upslogx(LOG_NOTICE, "apcmicrolink: Microlink tunnel unresponsive for "
-				"%ld s (%u consecutive failed retries) - attempting USB device "
-				"reset to recover",
-				(long)(now - microlink_fallback_since), microlink_fallback_retries);
-			microlink_fallback_since = now;
-			microlink_fallback_retries = 0;
-			tried_reset = 1;
-			if (microlink_usb_reset_and_reopen())
-				microlink_start_session();
+			if (usb_reset_on_stall_enabled) {
+				upslogx(LOG_NOTICE, "apcmicrolink: Microlink tunnel unresponsive for "
+					"%ld s (%u consecutive failed retries) - attempting USB device "
+					"reset to recover",
+					(long)(now - microlink_fallback_since), microlink_fallback_retries);
+				microlink_fallback_since = now;
+				microlink_fallback_retries = 0;
+				tried_reset = 1;
+				if (microlink_usb_reset_and_reopen())
+					microlink_start_session();
+			} else {
+				upslogx(LOG_NOTICE, "apcmicrolink: Microlink tunnel unresponsive for "
+					"%ld s (%u consecutive failed retries) - usb_reset_on_stall=no, "
+					"retrying without a USB device reset",
+					(long)(now - microlink_fallback_since), microlink_fallback_retries);
+				microlink_fallback_since = now;
+				microlink_fallback_retries = 0;
+			}
 		}
 #endif
 
@@ -3405,6 +3456,11 @@ void upsdrv_makevartable(void)
 		"Publish ups.status/battery.charge/battery.runtime from standard HID "
 		"Power Device usages when the Microlink tunnel has nothing fresh, "
 		"instead of going stale (USB only; yes/no, default yes)");
+	addvar(VAR_VALUE, "usb_reset_on_stall",
+		"Perform a USB device reset after repeated unresponsive retries "
+		"(USB only; yes/no, default yes; \"no\" keeps retrying in place "
+		"without resetting, useful when diagnosing whether the reset "
+		"itself helps recovery)");
 #endif /* WITH_USB */
 	addvar(VAR_VALUE, "baudrate", "Serial port baud rate (e.g. 9600, 19200, 38400)");
 	addvar(VAR_VALUE, "showinternals",

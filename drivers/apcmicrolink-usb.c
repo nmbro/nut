@@ -102,6 +102,7 @@
 #include "nut_libusb.h"
 #include "usb-common.h"
 #include "hidparser.h"
+#include "strcasestr-static.h"
 
 #include "apcmicrolink-usb.h"
 
@@ -237,6 +238,125 @@ static usb_device_id_t apcmicrolink_usb_device_table[] = {
 	{ 0, 0, NULL }
 };
 
+/* Common standalone USB-to-serial bridge chips: the overwhelming majority
+ * of "USB to RS232/DB9" cables people already have on hand to wire an older
+ * Smart-UPS's serial Microlink port to a USB-only PC use one of these. If
+ * "port=auto" (or an explicit vendorid/productid) matches one of these
+ * instead of a real Microlink-over-USB-HID device, the user almost
+ * certainly has the right cable but the wrong driver mode: this same
+ * apcmicrolink driver's serial transport (apcmicrolink.c, unmodified by
+ * this file) is what should be talking to the /dev/ttyUSB*|COM* node the
+ * kernel created for that chip, not this USB HID transport. */
+static const struct {
+	uint16_t vendorid;
+	uint16_t productid;
+	const char *name;
+} known_usb_serial_bridges[] = {
+	{ 0x0403, 0x6001, "FTDI FT232R" },
+	{ 0x0403, 0x6014, "FTDI FT232H" },
+	{ 0x0403, 0x6015, "FTDI FT230X" },
+	{ 0x067b, 0x2303, "Prolific PL2303" },
+	/* Also a legitimate UPS VID/PID elsewhere (nutdrv_qx, per
+	 * scripts/udev/nut-usbups.rules.in's own comment on this exact
+	 * pair) - same ambiguity, different driver; only the Product string
+	 * heuristic below can tell these two uses apart. */
+	{ 0x1a86, 0x7523, "WCH CH340/CH341" },
+	{ 0x10c4, 0xea60, "Silicon Labs CP2102/CP2109" },
+	{ 0x10c4, 0xea70, "Silicon Labs CP2105" },
+	{ 0x10c4, 0xea71, "Silicon Labs CP2108" },
+};
+
+/* Secondary, lower-confidence signal for chips/clones not in the table
+ * above: the kernel-visible Product string on genuine and rebadged
+ * USB-serial bridges almost always names the chip or says "serial"/"UART"
+ * outright, which a real Microlink tunnel device's Product string
+ * ("Smart-UPS ...") never does. */
+static const char *serial_bridge_product_keywords[] = {
+	"FTDI", "FT232", "FT231", "FT230",
+	"PL2303", "PROLIFIC",
+	"CH340", "CH341",
+	"CP210", "CP2102", "CP2105", "CP2108",
+	"USB SERIAL", "USB-SERIAL", "USB TO SERIAL", "UART BRIDGE",
+};
+
+/* Returns a short human-readable chip description if `device` looks like a
+ * generic USB-to-serial bridge rather than a Microlink-over-USB-HID device,
+ * NULL otherwise. Heuristic, not authoritative - see comments above. */
+static const char *microlink_usb_describe_serial_bridge(const USBDevice_t *device)
+{
+	size_t i;
+
+	for (i = 0; i < SIZEOF_ARRAY(known_usb_serial_bridges); i++) {
+		if (device->VendorID == known_usb_serial_bridges[i].vendorid
+		&&  device->ProductID == known_usb_serial_bridges[i].productid
+		) {
+			return known_usb_serial_bridges[i].name;
+		}
+	}
+
+	if (device->Product != NULL) {
+		for (i = 0; i < SIZEOF_ARRAY(serial_bridge_product_keywords); i++) {
+			if (strcasestr(device->Product, serial_bridge_product_keywords[i]) != NULL) {
+				return device->Product;
+			}
+		}
+	}
+
+	return NULL;
+}
+
+/* Rate-limit the diagnostics below to once per distinct (kind, VID:PID) per
+ * driver run - "port=auto" re-enumerates the whole USB bus on every
+ * reconnect (including every hard reset while a session is stuck), and
+ * without this an unrelated/incompatible device left plugged in would
+ * otherwise repeat the same message every reconnect cycle. */
+enum {
+	MLINK_USB_DIAG_SERIAL_BRIDGE = 1,	/* known/likely USB-serial bridge chip */
+	MLINK_USB_DIAG_NOT_A_UPS_HID = 2	/* HID device, but neither our tunnel nor HID-PDC */
+};
+
+#define MLINK_USB_DIAG_WARNED_MAX	6U
+static uint64_t mlink_usb_diag_warned[MLINK_USB_DIAG_WARNED_MAX];
+static size_t mlink_usb_diag_warned_count = 0;
+
+/* Returns nonzero the first time this (kind, vendorid, productid) is seen
+ * this run (caller should warn), zero on every repeat. */
+static int microlink_usb_diag_warn_once(int kind, uint16_t vendorid, uint16_t productid)
+{
+	uint64_t key = ((uint64_t)(unsigned int)kind << 32) | ((uint32_t)vendorid << 16) | productid;
+	size_t i;
+
+	for (i = 0; i < mlink_usb_diag_warned_count; i++) {
+		if (mlink_usb_diag_warned[i] == key) {
+			return 0;
+		}
+	}
+
+	if (mlink_usb_diag_warned_count < MLINK_USB_DIAG_WARNED_MAX) {
+		mlink_usb_diag_warned[mlink_usb_diag_warned_count++] = key;
+	}
+	return 1;
+}
+
+static void microlink_usb_warn_serial_bridge_once(const USBDevice_t *device, const char *desc)
+{
+	if (!microlink_usb_diag_warn_once(MLINK_USB_DIAG_SERIAL_BRIDGE,
+		device->VendorID, device->ProductID)
+	) {
+		return;
+	}
+
+	upslogx(LOG_WARNING,
+		"microlink_usb: USB device %04x:%04x (%s) matched your USB "
+		"port/vendorid/productid settings, but looks like a generic "
+		"USB-to-serial adapter, not a Microlink-over-USB-HID device. "
+		"If your UPS has a serial Microlink port wired to this adapter, "
+		"configure this driver in serial mode instead: point \"port\" "
+		"at the /dev/ttyUSB*, /dev/ttyACM* or COM* device this adapter "
+		"created, and remove vendorid/productid/port=auto.",
+		device->VendorID, device->ProductID, desc);
+}
+
 static int microlink_usb_match(USBDevice_t *device, void *privdata)
 {
 	NUT_UNUSED_VARIABLE(privdata);
@@ -249,6 +369,12 @@ static int microlink_usb_match(USBDevice_t *device, void *privdata)
 	case POSSIBLY_SUPPORTED:
 	case NOT_SUPPORTED:
 	default:
+		{
+			const char *bridge_desc = microlink_usb_describe_serial_bridge(device);
+			if (bridge_desc != NULL) {
+				microlink_usb_warn_serial_bridge_once(device, bridge_desc);
+			}
+		}
 		return 0;
 	}
 }
@@ -270,7 +396,6 @@ static int microlink_usb_report_callback(usb_dev_handle *arg_udev, USBDevice_t *
 	size_t i;
 
 	NUT_UNUSED_VARIABLE(arg_udev);
-	NUT_UNUSED_VARIABLE(hd);
 
 	mlink_report_out = 0;
 	mlink_report_in = 0;
@@ -347,8 +472,39 @@ static int microlink_usb_report_callback(usb_dev_handle *arg_udev, USBDevice_t *
 	Free_ReportDesc(hid_desc);
 
 	if (mlink_report_out == 0 || mlink_report_in == 0) {
+		int has_hid_pdc = (ff_ac_present.report_id != 0 && ff_discharging.report_id != 0);
+
 		upsdebugx(1, "microlink_usb: Microlink USB HID tunnel (vendor page 0xFF86, "
 			"usages 0xFC/0xFD) not found on this device");
+
+		/* Neither our vendor tunnel nor a standard HID Power Device usage
+		 * page: this device is not a supported UPS HID interface at all,
+		 * by a much more general (and reliable) signal than matching
+		 * against a necessarily-incomplete list of known chip VID/PIDs -
+		 * see microlink_usb_describe_serial_bridge() above, which is the
+		 * only check that still applies to a device with *no* HID
+		 * interface whatsoever (this callback is never even reached for
+		 * those - the underlying USB layer filters them out earlier). */
+		if (!has_hid_pdc
+		&&  microlink_usb_diag_warn_once(MLINK_USB_DIAG_NOT_A_UPS_HID,
+			hd->VendorID, hd->ProductID)
+		) {
+			upslogx(LOG_WARNING,
+				"microlink_usb: USB device %04x:%04x (%s) exposes a HID "
+				"interface but has neither the Microlink vendor tunnel nor "
+				"standard HID Power Device usages - this does not look "
+				"like a supported UPS HID interface at all (untested, "
+				"probably-wrong-driver territory). It may be an unrelated "
+				"HID device, or a USB-to-serial adapter's incidental HID "
+				"interface. If your UPS has a serial Microlink port wired "
+				"through a USB-to-serial adapter, configure this driver "
+				"in serial mode instead: point \"port\" at the adapter's "
+				"/dev/ttyUSB*, /dev/ttyACM* or COM* device, and remove "
+				"vendorid/productid/port=auto.",
+				hd->VendorID, hd->ProductID,
+				hd->Product ? hd->Product : "unknown product");
+		}
+
 		return -1;
 	}
 
@@ -783,6 +939,14 @@ static void LIBUSB_CALL microlink_usb_async_cb(struct libusb_transfer *transfer)
 			copy_len = MLINK_USB_REPORT_TOTAL_LEN;
 		}
 
+		/* Raw arrival, independent of queueing/report-ID outcome below -
+		 * the only visibility into what the pump thread actually receives
+		 * off the wire, as opposed to what the main thread later consumes. */
+		upsdebugx(4, "microlink_usb: async transfer completed: report 0x%02X, "
+			"%u bytes",
+			copy_len > 0 ? (unsigned int)transfer->buffer[0] : 0U,
+			(unsigned int)copy_len);
+
 		/* microlink_usb_try_decode_fallback() writes the fb_* globals that
 		 * microlink_usb_get_hid_fallback() reads on the main thread - both
 		 * now go through async_lock. Decode happens immediately on receipt,
@@ -1156,6 +1320,10 @@ int microlink_usb_get_char(unsigned char *ch, long d_usec)
 	memcpy(in_report, slot.data, copy_len);
 
 	if (copy_len < 2 || (int)in_report[0] != mlink_report_in) {
+		upsdebugx(4, "microlink_usb: discarding queued report 0x%02X "
+			"(%u bytes, want 0x%02X) - not our tunnel's Input report",
+			copy_len > 0 ? (unsigned int)in_report[0] : 0U,
+			(unsigned int)copy_len, (unsigned int)mlink_report_in);
 		in_report_len = 0;
 		in_report_pos = 0;
 		return 0;
