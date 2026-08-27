@@ -871,6 +871,7 @@ static void microlink_usb_try_decode_fallback(const unsigned char *report, size_
 	int report_id;
 	const unsigned char *data;
 	size_t data_len;
+	time_t now;
 
 	if (report_len < 1) {
 		return;
@@ -900,7 +901,8 @@ static void microlink_usb_try_decode_fallback(const unsigned char *report, size_
 	if (report_id == ff_ac_present.report_id || report_id == ff_discharging.report_id
 	 || report_id == ff_below_rcl.report_id || report_id == ff_remaining_capacity.report_id
 	 || report_id == ff_runtime_to_empty.report_id) {
-		fb_last_update = time(NULL);
+		now = time(NULL);
+		fb_last_update = now;
 	}
 }
 
