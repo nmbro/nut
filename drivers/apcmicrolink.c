@@ -92,17 +92,32 @@ upsdrv_info_t upsdrv_info = {
  * partway-through-the-96-row-descriptor-fetch session and restarting it
  * from zero (see the reconnect check in upsdrv_updateinfo()). That reuse
  * conflated two very different situations: giving up on the very first
- * handshake (cheap, nothing lost) versus giving up mid-fetch (expensive,
- * discards real progress). Live testing on 2026-08-24 showed the device
- * routinely goes quiet for 10-20+ seconds *during normal operation*, so a
- * session essentially never survived long enough to finish the descriptor
- * blob and reach authentication. This constant is deliberately separate,
- * much larger, and wall-clock-based (not a poll-count) so it stays correct
- * if MLINK_USB_READ_TIMEOUT_USEC or poll_interval ever change. 90s matches
- * the "device can legitimately go silent for 90+ seconds" figure already
- * observed and documented in this driver's development history; re-tune
- * against measured reconnect-frequency/depth data, not this comment. */
-#define MLINK_USB_MIDSESSION_IDLE_SEC	90
+ * handshake (cheap, nothing lost) versus giving up mid-fetch (expensive
+ * at the time - later fixes made reconnecting non-destructive, see
+ * febb2e55c/9a8a78bf3). This constant is deliberately separate, much
+ * larger than the handshake retry budget, and wall-clock-based (not a
+ * poll-count) so it stays correct if MLINK_USB_READ_TIMEOUT_USEC or
+ * poll_interval ever change.
+ *
+ * Value derived 2026-08-27 from a direct tshark/usbmon measurement of
+ * real tunnel Input-report (0x89) arrival gaps over ~7 clean hours on
+ * real hardware (825 replies). The gap distribution was sharply
+ * trimodal, not a smooth spread: ~80% under 5s, a tight cluster at
+ * 11.0-13.0s, then a completely empty band from 13s to 289s, then a
+ * tight cluster at 288.6-290.6s recurring roughly every 5m10s. No
+ * legitimate reply gap was ever observed between 13s and 289s. 30s sits
+ * with >2x margin above the 13s cluster's ceiling while staying nowhere
+ * near the 289s one, so it should never misfire on a normal pause while
+ * still catching a real stall far sooner than 90s did.
+ *
+ * Caveat: the measured window predated the async-queue-flush fix
+ * (f7f10fc70, same day) - what caused the ~289s cluster specifically is
+ * not established (an earlier theory that it reflected a genuine
+ * independent device heartbeat did not hold up to scrutiny). Only the
+ * empirical gap-distribution finding is treated as reliable here, not
+ * any particular explanation for it; re-derive from fresh post-fix data
+ * if this stops matching observed reconnect behavior. */
+#define MLINK_USB_MIDSESSION_IDLE_SEC	30
 
 /* How stale a standard-HID-PDC fallback snapshot is allowed
  * to be before it's still considered good enough to publish. Those
