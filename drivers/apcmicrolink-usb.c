@@ -22,60 +22,17 @@
  * outlet-group logic in apcmicrolink.c are untouched and unaware of which
  * transport is underneath.
  *
- * A background-thread reader (keeping a read continuously pending on the
- * interrupt IN endpoint, decoupled from write timing, mirroring the real
- * Windows driver's design) was tried here to see if it would improve this
- * device's occasionally-slow-to-respond behavior. A controlled A/B test
- * (two minimal standalone libusb programs, byte-identical 0xFD/0xFE
- * sequence, one threaded one not) showed the threaded version getting
- * *zero* successful replies over 10s while the sequential version got
- * several - a clear regression, not an improvement, likely from libusb's
- * synchronous API serializing event-handling between the two threads and
- * delaying the write. Reverted; this file is back to the simple
- * synchronous write-then-read design that is confirmed working.
- *
- * PROTOTYPE (2026-08-23): a *single-threaded* async listener, not the
- * two-thread design above. A wire capture during a real unresponsive
- * stretch showed the device genuinely emitting valid, correctly-checksummed
- * 0x89 tunnel replies roughly every ~10s - but the driver's own read window
- * (~1s open out of every ~5-6s retry cycle, an ~17-20% duty cycle, and
- * *zero* coverage during the multi-second sleep between retries) has real
- * odds of missing every single one. This keeps exactly one
- * libusb_interrupt_transfer() permanently outstanding via
- * libusb_submit_transfer()/a self-resubmitting callback, serviced by
- * libusb_handle_events_timeout_completed() calls made from the same thread
- * that also does the writes - no second thread, so none of the event-loop
- * contention that sank the earlier attempt applies. microlink_usb_get_char()
- * now just drains a small completed-report queue the callback fills,
- * falling back to the original synchronous get_interrupt() path if the
- * async transfer couldn't be started (non-libusb-1.0 builds, or
- * libusb_submit_transfer() failure).
- *
- * REVISION (2026-08-24): the single-threaded version above turned out not
- * to actually give continuous coverage. A libusb async transfer only gets
- * reaped/resubmitted when *something* calls libusb_handle_events*() - and
- * that only ever happened inside microlink_usb_get_char(), which the outer
- * driver loop only calls for ~1s once every ~5-6s retry cycle. Interrupt
- * endpoints are host-polled, not device-initiated: once the one outstanding
- * transfer completes, the host controller stops polling that endpoint
- * entirely until a new request is submitted - so between get_char() calls,
- * "always outstanding" silently stopped being outstanding, and a live
- * capture showed the same stale 0x89 replies still slipping through
- * unclaimed, on the same ~112s reset cadence as before this file existed.
- *
- * Fixed with a *dedicated* pump thread whose only job is calling
- * libusb_handle_events_timeout_completed() in a tight short-timeout loop -
- * nothing else. This is a different shape from the reverted two-thread
- * design above: that one had *both* threads independently doing
- * synchronous reads (each internally wanting to become "the event
- * handler"), which is what caused the regression. Here only one thread
- * ever touches the event loop; the main thread only takes a mutex to
- * drain/inspect the completed-report queue and never calls
- * libusb_handle_events*() itself (microlink_usb_flush_io() included - it
- * used to pump events directly too, which would have reintroduced a second
- * caller). Guarded by HAVE_PTHREAD in addition to WITH_LIBUSB_1_0; falls
- * back to the synchronous path if pthread support isn't available or
- * pthread_create() fails.
+ * On libusb-1.0 + pthread builds, reads are served by an always-outstanding
+ * async interrupt-IN transfer serviced by a dedicated pump thread (see
+ * microlink_usb_async_start()/microlink_usb_async_pump()) instead of a
+ * fresh per-call synchronous read - this device can go several seconds
+ * between replies, and a synchronous read only listens while the driver
+ * happens to be blocked waiting on one. Only the pump thread may ever call
+ * libusb_handle_events*() on this context; every other function only takes
+ * async_lock to drain/inspect the completed-report queue it fills. Falls
+ * back to the synchronous per-call read (microlink_usb_get_char_sync())
+ * when libusb-1.0/pthread aren't available, or if starting the listener
+ * fails for any reason.
  *
  * Copyright (C)
  *   2026 Lukas Schmid <lukas.schmid@netcube.li>
