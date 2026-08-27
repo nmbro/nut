@@ -286,15 +286,15 @@ const microlink_desc_value_map_t microlink_desc_value_map[] = {
 
 	/* Internal protocol state, not UPS telemetry - published for
 	 * troubleshooting visibility only, hence the microlink.diag namespace
-	 * rather than ups, battery, or experimental. */
-	/* This is MLINK_DESC_SLAVE_PASSWORD (see apcmicrolink.h) - the
-	 * writable register microlink_authenticate() sends its randomized
-	 * SPC challenge to. Confirmed live (2026-08-27, three separate
-	 * restarts with three different random challenges) that the device
-	 * echoes back exactly whatever was last written here - useful to see
-	 * during auth troubleshooting, but NOT by itself proof that
-	 * authentication was accepted (a device that blindly echoes any
-	 * register write would look identical). */
+	 * rather than ups, battery, or experimental. This is
+	 * MLINK_DESC_SLAVE_PASSWORD (see apcmicrolink.h) - the writable
+	 * register microlink_authenticate() sends its randomized SPC challenge
+	 * to. Confirmed live (2026-08-27, four separate restarts, four
+	 * different random challenges) that the device echoes back exactly
+	 * whatever was last written here - useful to see during auth
+	 * troubleshooting, but NOT by itself proof that authentication was
+	 * accepted (a device that blindly echoes any register write would
+	 * look identical). */
 	{ "2:4.8.5",   "microlink.diag.slave_password_echo",
 	                                      MLINK_DESC_HEX,          MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, NULL },
 };

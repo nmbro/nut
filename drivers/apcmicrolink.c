@@ -265,14 +265,19 @@ static int hid_fallback_enabled = 1;
 /* Whether to actually perform a USB device reset (microlink_usb_reset_and_
  * reopen()) once MLINK_USB_RESET_AFTER_RETRIES consecutive failed retries
  * have piled up, vs. just retrying microlink_start_session_impl() again in
- * place. USB-only; defaults on (unchanged behavior). Added while
- * investigating whether the reset is actually recovering anything: live
- * capture during a "stuck" session showed the device still emitting valid,
- * correctly-sized 0x89 tunnel reports on the wire well after resets that
- * supposedly failed to help, suggesting the resets may be irrelevant (or
- * actively unhelpful, e.g. by dropping/racing whatever partial protocol
- * state was mid-flight) rather than the device having genuinely gone deaf.
- * "usb_reset_on_stall=no" disables the reset call for that comparison. */
+ * place. USB-only; defaults on (unchanged behavior).
+ *
+ * Added to isolate two different failure modes that both looked like "the
+ * device stopped responding": one turned out to be two driver-side bugs
+ * (a stale cached frame length, and a queue flush discarding real replies -
+ * both fixed, see microlink_start_session_impl() and
+ * microlink_usb_flush_io()) that a reset never actually helped with -
+ * disabling resets and letting the fixed retry logic run on its own
+ * recovered those cases fine. The other is a real device/USB-layer
+ * disconnect (unplug, power cycle), where a reset is exactly what's needed
+ * and genuinely helps - a fixed retry loop alone left a session stuck for
+ * hours in that case in testing. Keep this on by default; it exists mainly
+ * as a diagnostic knob for isolating which failure mode is in play. */
 static int usb_reset_on_stall_enabled = 1;
 
 typedef enum microlink_command_source_e {
@@ -2877,9 +2882,9 @@ static int microlink_start_session_impl(unsigned int max_attempts)
 	 * discarding any genuine tunnel replies that arrived but haven't been
 	 * read yet. Isolated reproduction (a standalone test pushing synthetic
 	 * reports into the real async_queue at the device's actual observed
-	 * burst cadence while running this real retry loop) showed 100% of
-	 * otherwise-valid replies silently lost this way - not a one-off, the
-	 * mechanism every single time. The one case this flush existed for -
+	 * burst cadence while running this real retry loop) measured half of
+	 * otherwise-valid replies silently lost this way - not a one-off, a
+	 * steady loss rate every run. The one case this flush existed for -
 	 * clearing stale pre-reset data after a genuine hard USB reset - is
 	 * already handled by microlink_usb_async_stop() (called from
 	 * microlink_usb_reset_and_reopen()), which zeroes the same queue

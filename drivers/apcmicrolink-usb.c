@@ -704,14 +704,18 @@ void microlink_usb_flush_io(void)
 		 *
 		 * This unconditionally discards *everything* queued, including any
 		 * genuine tunnel replies (report mlink_report_in) that arrived
-		 * before this call but haven't been consumed yet - and this
-		 * function is called on every microlink_start_session_impl()
-		 * attempt, i.e. every ~2s throughout any "not ready, retrying"
-		 * stretch, not just at a genuine hard-reset boundary. That directly
-		 * undermines the whole point of the async queue (surviving gaps
-		 * between foreground polls). Logging what's discarded here, since
-		 * previously this was completely silent - no way to tell whether a
-		 * "stuck" session was ever throwing away real, useful replies. */
+		 * before this call but haven't been consumed yet. That's exactly
+		 * what made calling this on every microlink_start_session_impl()
+		 * retry attempt (removed - see the comment there) actively harmful:
+		 * it discarded real replies every ~2s throughout any "not ready,
+		 * retrying" stretch, undermining the whole point of the async queue
+		 * (surviving gaps between foreground polls). No current caller
+		 * remains in this driver; kept as part of the transport interface
+		 * for the one case where a flush is genuinely correct (clearing
+		 * stale pre-reset data right after a hard USB reset), which is
+		 * already handled independently by microlink_usb_async_stop()
+		 * instead. The discard logging below stays in place so any future
+		 * caller gets visibility for free instead of the previous silence. */
 		{
 			unsigned int discarded_count;
 			unsigned int discarded_tunnel_reports = 0;
