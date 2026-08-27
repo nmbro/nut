@@ -485,6 +485,33 @@ int microlink_usb_open(void)
 	char *regex_array[USBMATCHER_REGEXP_ARRAY_LIMIT];
 	int ret;
 
+#if WITH_LIBUSB_0_1
+	{
+		/* This build's libusb-0.1 backend has not been validated for this
+		 * driver: on at least one tested system, the installed libusb-0.1
+		 * library's interrupt-IN read did not honor its configured
+		 * timeout, hanging the driver indefinitely rather than timing out
+		 * and retrying (a defect traced to the library itself, not this
+		 * driver's WITH_LIBUSB_0_1 code path - confirmed by running the
+		 * same synchronous read path against a working libusb-1.0 build,
+		 * which cycled normally). Log once per process, not on every
+		 * reconnect. */
+		static int warned_libusb01 = 0;
+
+		if (!warned_libusb01) {
+			warned_libusb01 = 1;
+			upslogx(LOG_WARNING,
+				"apcmicrolink: built against libusb-0.1 - this transport is "
+				"untested for this driver and has shown a real interrupt-IN "
+				"read timeout defect on at least one system, causing the "
+				"driver to hang rather than retry. libusb-1.0 is the "
+				"tested/supported USB backend; if this driver becomes "
+				"unresponsive, rebuild NUT with --with-usb=libusb-1.0 "
+				"before investigating further.");
+		}
+	}
+#endif /* WITH_LIBUSB_0_1 */
+
 	warn_if_bad_usb_port_filename(device_path);
 
 	regex_array[0] = getval("vendorid");
