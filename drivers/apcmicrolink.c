@@ -132,35 +132,22 @@ upsdrv_info_t upsdrv_info = {
  * seconds keeps the threshold from being thrown off by a single slow probe
  * (each one already blocks up to MLINK_USB_READ_TIMEOUT_USEC on its own).
  *
- * Tried matching APC's own client's apparent default comms-timeout (about
- * 10s) here directly - i.e. give up and USB-reset after only ~10s instead
- * of ~120s. Tested live for 7+ hours: reset every ~13-14s, continuously,
- * without ever completing a single session-start. That's a clean,
- * decisive falsification - frequent bare USB resets are actively
- * counterproductive, not just unhelpful. Back to the value that has
- * actually connected in testing. This means APC's own client's fast
- * recovery is NOT simply "reset the bus every 10s" - it must do something
- * qualitatively different when it detects a lost/failed handshake; what
- * bytes it actually sends there is still an open question worth
- * investigating further.
- * Real-hardware testing found this device's Microlink tunnel can
- * legitimately go silent for 90+ seconds on its own schedule, and that an
- * isolated USB reset issued mid-stall doesn't shorten it - so this stays
- * tuned to stay clear of that window (target ~120 s). Re-verify the
- * retries-per-second math against the actual observed cadence any time
- * MLINK_SESSION_RETRY_INTERVAL_SEC, the read timeout, or the number of
- * writes issued per retry attempt changes - don't just recompute from the
- * nominal constants. This constant has already drifted twice from doing
- * that math instead of measuring: 20 -> 60 assumed ~2 s/retry, measured
- * ~1.05 s/retry (only ~63 s actual); 60 -> 115 fixed that, but then
- * adding the MLINK_STOP_BYTE write below made each retry attempt issue
- * two writes instead of one, which pushed the real cadence to ~1.89
- * s/retry (~217 s actual, measured live over a 5 h run) without this
- * constant being touched. 115 -> 64 corrects for that (64 * ~1.89 s/retry
- * =~ 120 s). Pre-setting microlink_fallback_retries to this value on a
- * fallback startup means the first upsdrv_updateinfo() call can try a
- * reset immediately rather than waiting a full new window, since the
- * startup handshake already proved the device unresponsive. */
+ * Tried ~10s (matching APC's client's apparent comms-timeout) instead of
+ * ~120s: 7+ hours live, reset every ~13-14s, never completed a
+ * session-start. Frequent bare resets are actively counterproductive, not
+ * just unhelpful - back to a value proven to connect. Also: this device's
+ * tunnel can legitimately go silent 90+s on its own schedule and a
+ * mid-stall reset doesn't shorten it, so stay clear of that window
+ * (target ~120s).
+ *
+ * WARNING: re-derive this from measured cadence, don't just recompute
+ * from nominal constants - it's drifted wrong twice that way (assumed
+ * ~2s/retry when actual was ~1.05s; then a later write-count change
+ * silently pushed actual cadence to ~1.89s/retry without this constant
+ * being touched). 64 * ~1.89s/retry =~ 120s is today's real basis.
+ * Pre-setting microlink_fallback_retries to this on fallback startup lets
+ * the first updateinfo() call reset immediately, since startup already
+ * proved the device unresponsive. */
 #define MLINK_USB_RESET_AFTER_RETRIES		64
 
 #define MLINK_DESC_OP_USAGE_SIZE	0xFC
@@ -262,22 +249,14 @@ static const char *const outlet_suffixes[] = {
  * original behavior. */
 static int hid_fallback_enabled = 1;
 
-/* Whether to actually perform a USB device reset (microlink_usb_reset_and_
- * reopen()) once MLINK_USB_RESET_AFTER_RETRIES consecutive failed retries
- * have piled up, vs. just retrying microlink_start_session_impl() again in
- * place. USB-only; defaults on (unchanged behavior).
- *
- * Added to isolate two different failure modes that both looked like "the
- * device stopped responding": one turned out to be two driver-side bugs
- * (a stale cached frame length, and a queue flush discarding real replies -
- * both fixed, see microlink_start_session_impl() and
- * microlink_usb_flush_io()) that a reset never actually helped with -
- * disabling resets and letting the fixed retry logic run on its own
- * recovered those cases fine. The other is a real device/USB-layer
- * disconnect (unplug, power cycle), where a reset is exactly what's needed
- * and genuinely helps - a fixed retry loop alone left a session stuck for
- * hours in that case in testing. Keep this on by default; it exists mainly
- * as a diagnostic knob for isolating which failure mode is in play. */
+/* Whether to USB-reset (microlink_usb_reset_and_reopen()) after
+ * MLINK_USB_RESET_AFTER_RETRIES failed retries, vs. just retrying in
+ * place. USB-only; defaults on. A reset never helped the two driver bugs
+ * this flag was added to isolate (both since fixed - see
+ * microlink_start_session_impl(), microlink_usb_flush_io()), but does
+ * genuinely help a real device/USB disconnect, where retrying alone left
+ * a session stuck for hours in testing. Keep on by default; useful as a
+ * diagnostic knob for telling those failure modes apart. */
 static int usb_reset_on_stall_enabled = 1;
 
 typedef enum microlink_command_source_e {
@@ -2849,47 +2828,23 @@ static int microlink_start_session_impl(unsigned int max_attempts)
 	poll_primed = 0;
 	authentication_sent = 0;
 
-	/* Deliberately NOT resetting page0/descriptor_ready/descriptor_usage_count/
-	 * descriptor_blob_len here: this function runs on every (re)connect
-	 * attempt, not just the process's first-ever session, and wiping page0
-	 * on every one of those was a real bug, not just a missed optimization.
-	 * microlink_try_extract_frame_at() only uses the raw-byte-derived
-	 * sourcebuf[2] to compute frame length the *first* time
-	 * MLINK_OBJ_PROTOCOL is ever seen (objects[] - and so ->seen - is reset
-	 * exactly once, in upsdrv_initinfo() at process start, never again);
-	 * every later call falls through to trusting the cached page0.width
-	 * instead. Zeroing page0 here left ->seen permanently true while
-	 * page0.width kept getting reset to 0 on every reconnect after the
-	 * first successful one in a process's life, making every frame-length
-	 * calculation come out as 0+3=3 - a "frame" too short to ever pass
-	 * checksum validation. The device kept replying correctly the whole
-	 * time (confirmed live via USB capture); we were the ones who could
-	 * never parse another reply again for the rest of that process's
-	 * lifetime, silently, with no error - explains why only a full driver
-	 * *process* restart (not a reconnect, not even a USB hard reset) ever
-	 * recovered a stuck session in testing. page0's fields are static
-	 * device/firmware properties that don't change across a reconnect to
-	 * the same physical device, and microlink_cache_object() already
-	 * refreshes them from any freshly-received page0 frame regardless of
-	 * whether they were already populated - so preserving the old values
-	 * here costs nothing and only helps parsing survive the gap. */
+	/* NOT resetting page0/descriptor_ready/descriptor_usage_count/
+	 * descriptor_blob_len: this runs on every reconnect, not just the
+	 * first session. objects[]->seen (which gates whether frame-length
+	 * parsing trusts page0.width) only resets at process start, so
+	 * zeroing page0.width here left every reconnect after the first
+	 * computing frame length as 0+3=3 - too short to ever checksum-valid.
+	 * The device was replying fine the whole time; we just stopped being
+	 * able to parse it. page0 is static per device/firmware and gets
+	 * refreshed on receipt anyway, so keeping stale values costs nothing. */
 
-	/* Deliberately NOT calling microlink_usb_flush_io() for the USB case
-	 * here (unlike the serial ser_flush_io() below): this function runs on
-	 * every (re)connect attempt, including every retry in a "not ready
-	 * yet" loop that can span many minutes with no hard reset involved -
-	 * and flushing there unconditionally wipes the async listener's queue,
-	 * discarding any genuine tunnel replies that arrived but haven't been
-	 * read yet. Isolated reproduction (a standalone test pushing synthetic
-	 * reports into the real async_queue at the device's actual observed
-	 * burst cadence while running this real retry loop) measured half of
-	 * otherwise-valid replies silently lost this way - not a one-off, a
-	 * steady loss rate every run. The one case this flush existed for -
-	 * clearing stale pre-reset data after a genuine hard USB reset - is
-	 * already handled by microlink_usb_async_stop() (called from
-	 * microlink_usb_reset_and_reopen()), which zeroes the same queue
-	 * counters itself; this call was redundant there and actively harmful
-	 * everywhere else. */
+	/* NOT calling microlink_usb_flush_io() for USB (unlike ser_flush_io()
+	 * below): it wipes the async queue, and this runs every retry in a
+	 * "not ready yet" loop that can span minutes. Isolated test: this
+	 * discarded ~50% of otherwise-valid replies. The only real use case
+	 * (clearing stale data after a hard reset) is already handled by
+	 * microlink_usb_async_stop(), making this call redundant there and
+	 * harmful everywhere else. */
 #ifdef WITH_USB
 	if (!is_usb)
 #endif /* WITH_USB */

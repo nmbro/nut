@@ -238,15 +238,11 @@ static usb_device_id_t apcmicrolink_usb_device_table[] = {
 	{ 0, 0, NULL }
 };
 
-/* Common standalone USB-to-serial bridge chips: the overwhelming majority
- * of "USB to RS232/DB9" cables people already have on hand to wire an older
- * Smart-UPS's serial Microlink port to a USB-only PC use one of these. If
- * "port=auto" (or an explicit vendorid/productid) matches one of these
- * instead of a real Microlink-over-USB-HID device, the user almost
- * certainly has the right cable but the wrong driver mode: this same
- * apcmicrolink driver's serial transport (apcmicrolink.c, unmodified by
- * this file) is what should be talking to the /dev/ttyUSB*|COM* node the
- * kernel created for that chip, not this USB HID transport. */
+/* Common USB-to-serial bridge chips - what most generic "USB to RS232"
+ * cables use to wire an older Smart-UPS's serial Microlink port to a
+ * USB-only PC. A match here on "port=auto" means the right cable, wrong
+ * driver mode: use this driver's serial transport (apcmicrolink.c)
+ * against the resulting /dev/ttyUSB*|COM* node instead. */
 static const struct {
 	uint16_t vendorid;
 	uint16_t productid;
@@ -477,14 +473,12 @@ static int microlink_usb_report_callback(usb_dev_handle *arg_udev, USBDevice_t *
 		upsdebugx(1, "microlink_usb: Microlink USB HID tunnel (vendor page 0xFF86, "
 			"usages 0xFC/0xFD) not found on this device");
 
-		/* Neither our vendor tunnel nor a standard HID Power Device usage
-		 * page: this device is not a supported UPS HID interface at all,
-		 * by a much more general (and reliable) signal than matching
-		 * against a necessarily-incomplete list of known chip VID/PIDs -
-		 * see microlink_usb_describe_serial_bridge() above, which is the
-		 * only check that still applies to a device with *no* HID
-		 * interface whatsoever (this callback is never even reached for
-		 * those - the underlying USB layer filters them out earlier). */
+		/* Neither our vendor tunnel nor standard HID Power Device usages:
+		 * not a supported UPS HID interface, period - more reliable than
+		 * matching a necessarily-incomplete VID/PID list (see
+		 * microlink_usb_describe_serial_bridge() above, which only covers
+		 * devices with no HID interface at all - this callback never even
+		 * fires for those). */
 		if (!has_hid_pdc
 		&&  microlink_usb_diag_warn_once(MLINK_USB_DIAG_NOT_A_UPS_HID,
 			hd->VendorID, hd->ProductID)
@@ -702,20 +696,13 @@ void microlink_usb_flush_io(void)
 		 * pattern that caused the regression in the reverted two-thread
 		 * design (see the file header comment).
 		 *
-		 * This unconditionally discards *everything* queued, including any
-		 * genuine tunnel replies (report mlink_report_in) that arrived
-		 * before this call but haven't been consumed yet. That's exactly
-		 * what made calling this on every microlink_start_session_impl()
-		 * retry attempt (removed - see the comment there) actively harmful:
-		 * it discarded real replies every ~2s throughout any "not ready,
-		 * retrying" stretch, undermining the whole point of the async queue
-		 * (surviving gaps between foreground polls). No current caller
-		 * remains in this driver; kept as part of the transport interface
-		 * for the one case where a flush is genuinely correct (clearing
-		 * stale pre-reset data right after a hard USB reset), which is
-		 * already handled independently by microlink_usb_async_stop()
-		 * instead. The discard logging below stays in place so any future
-		 * caller gets visibility for free instead of the previous silence. */
+		 * This discards *everything* queued, including unread genuine
+		 * tunnel replies - which is why calling it on every
+		 * microlink_start_session_impl() retry (removed, see there) was
+		 * harmful. No caller remains in this driver; kept for the one case
+		 * a flush is correct (clearing stale data post-hard-reset), which
+		 * microlink_usb_async_stop() already handles independently. Discard
+		 * logging stays so any future caller gets visibility for free. */
 		{
 			unsigned int discarded_count;
 			unsigned int discarded_tunnel_reports = 0;
