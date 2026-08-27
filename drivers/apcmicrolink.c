@@ -2753,7 +2753,7 @@ static int microlink_receive_once(void)
 	}
 }
 
-static int microlink_poll_once(void)
+static int microlink_poll_once(time_t now)
 {
 	if (!poll_primed) {
 		if (!microlink_prime_poll()) {
@@ -2763,7 +2763,7 @@ static int microlink_poll_once(void)
 
 	if (microlink_receive_once()) {
 		consecutive_timeouts = 0;
-		last_poll_success = microlink_now();
+		last_poll_success = now;
 		poll_primed = 0;
 		return 1;
 	}
@@ -3210,7 +3210,9 @@ void upsdrv_initinfo(void)
 	if (microlink_start_session()) {
 		microlink_ready = 1;
 		while (microlink_ready && !microlink_startup_ready()) {
-			if (!microlink_poll_once() && consecutive_timeouts >= microlink_handshake_retries()) {
+			time_t now = microlink_now();
+
+			if (!microlink_poll_once(now) && consecutive_timeouts >= microlink_handshake_retries()) {
 				microlink_ready = 0;
 			}
 		}
@@ -3317,7 +3319,7 @@ void upsdrv_updateinfo(void)
 		poll_interval = microlink_configured_poll_interval;
 	}
 
-	if (microlink_poll_once()) {
+	if (microlink_poll_once(now)) {
 		good = 1;
 	}
 
