@@ -545,14 +545,14 @@ static unsigned int microlink_handshake_retries(void)
  * budget than the initial handshake (see MLINK_USB_MIDSESSION_IDLE_SEC);
  * serial keeps the original poll-count behavior, since the too-short-tolerance
  * problem was only observed and characterized on USB. */
-static int microlink_midsession_timed_out(void)
+static int microlink_midsession_timed_out(time_t now)
 {
 #ifdef WITH_USB
 	if (is_usb) {
 		if (last_poll_success == 0) {
 			return consecutive_timeouts >= microlink_handshake_retries();
 		}
-		return difftime(time(NULL), last_poll_success) >= MLINK_USB_MIDSESSION_IDLE_SEC;
+		return difftime(now, last_poll_success) >= MLINK_USB_MIDSESSION_IDLE_SEC;
 	}
 #endif /* WITH_USB */
 	return consecutive_timeouts >= microlink_handshake_retries();
@@ -3321,7 +3321,7 @@ void upsdrv_updateinfo(void)
 		good = 1;
 	}
 
-	if (!good && microlink_midsession_timed_out()) {
+	if (!good && microlink_midsession_timed_out(now)) {
 		if (!microlink_reconnect_session()) {
 			microlink_datastale_or_fallback();
 			return;
