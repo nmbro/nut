@@ -2762,10 +2762,8 @@ static int microlink_poll_once(void)
 	}
 
 	if (microlink_receive_once()) {
-		time_t now = time(NULL);
-
 		consecutive_timeouts = 0;
-		last_poll_success = now;
+		last_poll_success = microlink_now();
 		poll_primed = 0;
 		return 1;
 	}
@@ -2823,10 +2821,8 @@ static int microlink_start_session_impl(unsigned int max_attempts)
 		}
 
 		if (microlink_receive_once()) {
-			time_t now = time(NULL);
-
 			consecutive_timeouts = 0;
-			last_poll_success = now;
+			last_poll_success = microlink_now();
 			session_ready = 1;
 			upsdebugx(1, "microlink: STABILITY session_established attempt=%u",
 				attempt + 1);
@@ -3092,7 +3088,7 @@ static int instcmd(const char *cmdname, const char *extra)
 void upsdrv_initups(void)
 {
 	int use_usb = 0;
-	time_t now = time(NULL);
+	time_t now = microlink_now();
 
 	srand((unsigned int)now);
 
@@ -3241,13 +3237,11 @@ void upsdrv_initinfo(void)
 		microlink_publish_runtime();
 		microlink_publish_hid_fallback_inactive();
 	} else if (microlink_publish_hid_fallback()) {
-		time_t now = time(NULL);
-
 		session_ready = 0;
 		/* Backdate microlink_fallback_since by the probing time the startup
 		 * handshake already spent, so the diagnostic log message below
 		 * reports a realistic elapsed time instead of ~0s. */
-		microlink_fallback_since = now - (time_t)microlink_handshake_retries();
+		microlink_fallback_since = microlink_now() - (time_t)microlink_handshake_retries();
 		upslogx(LOG_WARNING, "apcmicrolink: could not complete Microlink startup on %s - "
 			"starting up with standard-HID fallback data only (ups.status/"
 			"battery.charge/battery.runtime); outlet-group data and commands "
@@ -3275,7 +3269,7 @@ void upsdrv_initinfo(void)
 void upsdrv_updateinfo(void)
 {
 	int good = 0;
-	time_t now = time(NULL);
+	time_t now = microlink_now();
 
 	if (!session_ready) {
 		int reopening = 0;

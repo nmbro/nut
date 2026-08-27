@@ -61,6 +61,7 @@
 #include "hidparser.h"
 #include "strcasestr-static.h"
 
+#include "apcmicrolink.h"
 #include "apcmicrolink-usb.h"
 
 /* American Power Conversion */
@@ -871,7 +872,6 @@ static void microlink_usb_try_decode_fallback(const unsigned char *report, size_
 	int report_id;
 	const unsigned char *data;
 	size_t data_len;
-	time_t now;
 
 	if (report_len < 1) {
 		return;
@@ -901,8 +901,7 @@ static void microlink_usb_try_decode_fallback(const unsigned char *report, size_
 	if (report_id == ff_ac_present.report_id || report_id == ff_discharging.report_id
 	 || report_id == ff_below_rcl.report_id || report_id == ff_remaining_capacity.report_id
 	 || report_id == ff_runtime_to_empty.report_id) {
-		now = time(NULL);
-		fb_last_update = now;
+		fb_last_update = microlink_now();
 	}
 }
 
@@ -1164,7 +1163,7 @@ int microlink_usb_get_hid_fallback(int max_age_sec,
 #endif /* WITH_LIBUSB_1_0 && HAVE_PTHREAD */
 
 	if (fb_last_update == 0 || max_age_sec < 0
-	 || difftime(time(NULL), fb_last_update) > (double)max_age_sec) {
+	 || difftime(microlink_now(), fb_last_update) > (double)max_age_sec) {
 #if WITH_LIBUSB_1_0 && defined(HAVE_PTHREAD)
 		pthread_mutex_unlock(&async_lock);
 #endif /* WITH_LIBUSB_1_0 && HAVE_PTHREAD */
