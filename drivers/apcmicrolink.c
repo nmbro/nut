@@ -126,29 +126,6 @@ upsdrv_info_t upsdrv_info = {
  * still spends most of its time in a real blocking wait, not
  * busy-polling). */
 #define MLINK_SESSION_RETRY_INTERVAL_SEC	1
-/* Number of consecutive failed Microlink session-start probes (spaced
- * MLINK_SESSION_RETRY_INTERVAL_SEC apart) tolerated before a USB device
- * reset is attempted. Counting failed probes rather than raw wall-clock
- * seconds keeps the threshold from being thrown off by a single slow probe
- * (each one already blocks up to MLINK_USB_READ_TIMEOUT_USEC on its own).
- *
- * Tried ~10s (matching APC's client's apparent comms-timeout) instead of
- * ~120s: 7+ hours live, reset every ~13-14s, never completed a
- * session-start. Frequent bare resets are actively counterproductive, not
- * just unhelpful - back to a value proven to connect. Also: this device's
- * tunnel can legitimately go silent 90+s on its own schedule and a
- * mid-stall reset doesn't shorten it, so stay clear of that window
- * (target ~120s).
- *
- * WARNING: re-derive this from measured cadence, don't just recompute
- * from nominal constants - it's drifted wrong twice that way (assumed
- * ~2s/retry when actual was ~1.05s; then a later write-count change
- * silently pushed actual cadence to ~1.89s/retry without this constant
- * being touched). 64 * ~1.89s/retry =~ 120s is today's real basis.
- * Pre-setting microlink_fallback_retries to this on fallback startup lets
- * the first updateinfo() call reset immediately, since startup already
- * proved the device unresponsive. */
-#define MLINK_USB_RESET_AFTER_RETRIES		64
 
 #define MLINK_DESC_OP_USAGE_SIZE	0xFC
 #define MLINK_DESC_OP_COLLECTION	0xFD
@@ -248,16 +225,6 @@ static const char *const outlet_suffixes[] = {
  * mixed into the same series) - "hid_fallback=no" opts back out to the
  * original behavior. */
 static int hid_fallback_enabled = 1;
-
-/* Whether to USB-reset (microlink_usb_reset_and_reopen()) after
- * MLINK_USB_RESET_AFTER_RETRIES failed retries, vs. just retrying in
- * place. USB-only; defaults on. A reset never helped the two driver bugs
- * this flag was added to isolate (both since fixed - see
- * microlink_start_session_impl(), microlink_usb_flush_io()), but does
- * genuinely help a real device/USB disconnect, where retrying alone left
- * a session stuck for hours in testing. Keep on by default; useful as a
- * diagnostic knob for telling those failure modes apart. */
-static int usb_reset_on_stall_enabled = 1;
 
 typedef enum microlink_command_source_e {
 	MLINK_CMD_SOURCE_RJ45 = 0,
@@ -538,20 +505,6 @@ static void microlink_read_config(void)
 			hid_fallback_enabled = parsed;
 		} else {
 			fatalx(EXIT_FAILURE, "apcmicrolink: invalid hid_fallback value '%s'",
-				value);
-		}
-	}
-
-	if (testvar("usb_reset_on_stall")) {
-		int parsed = 0;
-
-		value = getval("usb_reset_on_stall");
-		if (value == NULL) {
-			usb_reset_on_stall_enabled = 1;
-		} else if (microlink_parse_bool(value, &parsed)) {
-			usb_reset_on_stall_enabled = parsed;
-		} else {
-			fatalx(EXIT_FAILURE, "apcmicrolink: invalid usb_reset_on_stall value '%s'",
 				value);
 		}
 	}
@@ -3285,15 +3238,10 @@ void upsdrv_initinfo(void)
 		microlink_publish_hid_fallback_inactive();
 	} else if (microlink_publish_hid_fallback()) {
 		session_ready = 0;
-		/* Pre-set the failed-retry count so upsdrv_updateinfo() can try a USB
-		 * reset immediately rather than waiting for a full new window of
-		 * retries: the startup handshake already spent
-		 * microlink_handshake_retries() x 1s probing with no response,
-		 * proving the device is already stalled. Backdate microlink_fallback_since
-		 * by that same probe count too, purely so the diagnostic log message
-		 * below reports a realistic elapsed time instead of ~0s. */
+		/* Backdate microlink_fallback_since by the probing time the startup
+		 * handshake already spent, so the diagnostic log message below
+		 * reports a realistic elapsed time instead of ~0s. */
 		microlink_fallback_since = time(NULL) - (time_t)microlink_handshake_retries();
-		microlink_fallback_retries = MLINK_USB_RESET_AFTER_RETRIES;
 		upslogx(LOG_WARNING, "apcmicrolink: could not complete Microlink startup on %s - "
 			"starting up with standard-HID fallback data only (ups.status/"
 			"battery.charge/battery.runtime); outlet-group data and commands "
@@ -3324,7 +3272,7 @@ void upsdrv_updateinfo(void)
 	time_t now = time(NULL);
 
 	if (!session_ready) {
-		int tried_reset = 0;
+		int reopening = 0;
 
 		if (microlink_fallback_since == 0)
 			microlink_fallback_since = now;
@@ -3336,34 +3284,29 @@ void upsdrv_updateinfo(void)
 		}
 
 #ifdef WITH_USB
-		if (microlink_fallback_retries >= MLINK_USB_RESET_AFTER_RETRIES) {
-			if (usb_reset_on_stall_enabled) {
-				upslogx(LOG_NOTICE, "apcmicrolink: Microlink tunnel unresponsive for "
-					"%ld s (%u consecutive failed retries) - attempting USB device "
-					"reset to recover",
-					(long)(now - microlink_fallback_since), microlink_fallback_retries);
-				microlink_fallback_since = now;
-				microlink_fallback_retries = 0;
-				tried_reset = 1;
-				if (microlink_usb_reset_and_reopen())
-					microlink_start_session();
-			} else {
-				upslogx(LOG_NOTICE, "apcmicrolink: Microlink tunnel unresponsive for "
-					"%ld s (%u consecutive failed retries) - usb_reset_on_stall=no, "
-					"retrying without a USB device reset",
-					(long)(now - microlink_fallback_since), microlink_fallback_retries);
-				microlink_fallback_since = now;
-				microlink_fallback_retries = 0;
-			}
+		/* A reset only ever helps a genuine USB disconnect (confirmed live:
+		 * it recovered a real unplug/power-cycle); it never once helped a
+		 * live-but-stalled tunnel in testing, so that's the only condition
+		 * that triggers one now - not a blind retry count. */
+		if (is_usb && microlink_usb_device_gone()) {
+			upslogx(LOG_NOTICE, "apcmicrolink: USB device appears to have been "
+				"disconnected (unresponsive for %ld s) - reopening once it "
+				"reappears", (long)(now - microlink_fallback_since));
+			reopening = 1;
+			if (microlink_usb_reset_and_reopen())
+				microlink_start_session();
+		} else if (microlink_fallback_retries > 0 && microlink_fallback_retries % 64 == 0) {
+			upslogx(LOG_NOTICE, "apcmicrolink: Microlink tunnel unresponsive for "
+				"%ld s (%u consecutive failed retries)",
+				(long)(now - microlink_fallback_since), microlink_fallback_retries);
 		}
 #endif
 
-		if (!tried_reset)
+		if (!reopening)
 			microlink_start_session_impl(1);
 
 		if (!session_ready) {
-			if (!tried_reset)
-				microlink_fallback_retries++;
+			microlink_fallback_retries++;
 			microlink_session_next_retry = now + MLINK_SESSION_RETRY_INTERVAL_SEC;
 			poll_interval = MLINK_SESSION_RETRY_INTERVAL_SEC;
 			microlink_datastale_or_fallback();
@@ -3430,11 +3373,6 @@ void upsdrv_makevartable(void)
 		"Publish ups.status/battery.charge/battery.runtime from standard HID "
 		"Power Device usages when the Microlink tunnel has nothing fresh, "
 		"instead of going stale (USB only; yes/no, default yes)");
-	addvar(VAR_VALUE, "usb_reset_on_stall",
-		"Perform a USB device reset after repeated unresponsive retries "
-		"(USB only; yes/no, default yes; \"no\" keeps retrying in place "
-		"without resetting, useful when diagnosing whether the reset "
-		"itself helps recovery)");
 #endif /* WITH_USB */
 	addvar(VAR_VALUE, "baudrate", "Serial port baud rate (e.g. 9600, 19200, 38400)");
 	addvar(VAR_VALUE, "showinternals",

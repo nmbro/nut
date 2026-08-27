@@ -173,6 +173,15 @@ static USBDevice_t curDevice;
 static USBDeviceMatcher_t *regex_matcher = NULL;
 static usb_communication_subdriver_t *comm_driver = &usb_subdriver;
 
+/* Set the moment any read, write, or async transfer completion reports
+ * LIBUSB_ERROR_NO_DEVICE/LIBUSB_TRANSFER_NO_DEVICE - a genuine physical
+ * disconnect (unplug, power cycle), not just "no reply yet". Cleared once
+ * microlink_usb_open() succeeds again. apcmicrolink.c polls this to decide
+ * when a USB reset-and-reopen is actually warranted, instead of guessing
+ * from a retry count (which fired just as often for a live-but-stalled
+ * device a reset never helped, as confirmed by testing). */
+static int usb_device_gone = 0;
+
 #if WITH_LIBUSB_1_0 && defined(HAVE_PTHREAD)
 /* Always-outstanding async interrupt-IN listener, serviced by a dedicated
  * pump thread. One libusb_transfer is kept permanently submitted; its
@@ -549,6 +558,7 @@ int microlink_usb_open(void)
 	if (ret < 1) {
 		fatalx(EXIT_FAILURE, "apcmicrolink: no matching USB Microlink UPS found");
 	}
+	usb_device_gone = 0;
 
 	dstate_setinfo("ups.vendorid", "%04x", curDevice.VendorID);
 	dstate_setinfo("ups.productid", "%04x", curDevice.ProductID);
@@ -645,6 +655,7 @@ int microlink_usb_reset_and_reopen(void)
 		udev = NULL;
 		return 0;
 	}
+	usb_device_gone = 0;
 
 	upsdebugx(1, "microlink_usb: reset and reopened %s/%s (USB %04x:%04x)",
 		curDevice.Vendor ? curDevice.Vendor : "unknown",
@@ -659,6 +670,11 @@ int microlink_usb_reset_and_reopen(void)
 #endif /* WITH_LIBUSB_1_0 && HAVE_PTHREAD */
 
 	return 1;
+}
+
+int microlink_usb_device_gone(void)
+{
+	return usb_device_gone;
 }
 
 /* A timeout of 0 to libusb_interrupt_transfer() means "wait forever", not
@@ -843,6 +859,10 @@ int microlink_usb_send_bytes(const unsigned char *buf, size_t len)
 		return 0;
 	}
 
+	if (ret == LIBUSB_ERROR_NO_DEVICE) {
+		usb_device_gone = 1;
+	}
+
 	if (ret < 0) {
 		upsdebugx(1, "microlink_usb: interrupt-OUT write (Output 0x%02X) failed: %s",
 			(unsigned int)mlink_report_out, nut_usb_strerror(ret));
@@ -1013,6 +1033,9 @@ static void LIBUSB_CALL microlink_usb_async_cb(struct libusb_transfer *transfer)
 		/* Teardown in progress, or the device is gone - don't resubmit.
 		 * microlink_usb_async_stop() owns freeing this transfer/buffer
 		 * once it observes async_xfer_active go to 0. */
+		if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
+			usb_device_gone = 1;
+		}
 		pthread_mutex_lock(&async_lock);
 		async_xfer_active = 0;
 		pthread_mutex_unlock(&async_lock);
@@ -1248,6 +1271,10 @@ static int microlink_usb_get_char_sync(unsigned char *ch, long d_usec)
 		in_report_len = 0;
 		in_report_pos = 0;
 		return -1;
+	}
+
+	if (ret == LIBUSB_ERROR_NO_DEVICE) {
+		usb_device_gone = 1;
 	}
 
 	if (ret < 0) {
