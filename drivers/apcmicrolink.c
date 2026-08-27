@@ -44,6 +44,18 @@ upsdrv_info_t upsdrv_info = {
 #define MLINK_DEFAULT_BAUDRATE		B9600
 #define MLINK_NEXT_BYTE			0xFE
 #define MLINK_INIT_BYTE			0xFD
+/* 0xFE/0xFD are the same ACK/NAK bytes APC's own PowerChute Serial
+ * Shutdown client uses (matching MLINK_NEXT_BYTE/MLINK_INIT_BYTE above
+ * exactly), and 0xF7 is its STOP byte - sent, unconditionally,
+ * immediately before every NAK it issues while recovering from a comms
+ * timeout. We had never sent this byte at all; see MLINK_STOP_THEN_INIT()
+ * below for why that appears to matter. Also cross-confirms an
+ * independent third-party finding already in this codebase's history: the
+ * two-byte APC_CMD_INIT = [0xF7, 0xFD] sequence documented for the older
+ * Smart-UPS C1000/SMC1000i in SCL500RM1UC-protocol-notes.md isn't a
+ * different device's alternate init byte - it's this exact STOP-then-NAK
+ * pair. */
+#define MLINK_STOP_BYTE			0xF7
 #define MLINK_HANDSHAKE_RETRIES	3
 #define MLINK_READ_TIMEOUT_USEC	100000
 /* Confirmed against real SCL500RMI1UC hardware over USB: unlike serial,
@@ -74,6 +86,24 @@ upsdrv_info_t upsdrv_info = {
  * treating it as a real communication failure. */
 #define MLINK_USB_HANDSHAKE_RETRIES	10
 
+/* EXPERIMENTAL (stability variant A, 2026-08-24): MLINK_USB_HANDSHAKE_RETRIES
+ * (10 poll cycles, ~10-20s depending on poll_interval) was, until this
+ * change, ALSO the threshold for tearing down an already-established,
+ * partway-through-the-96-row-descriptor-fetch session and restarting it
+ * from zero (see the reconnect check in upsdrv_updateinfo()). That reuse
+ * conflated two very different situations: giving up on the very first
+ * handshake (cheap, nothing lost) versus giving up mid-fetch (expensive,
+ * discards real progress). Live testing on 2026-08-24 showed the device
+ * routinely goes quiet for 10-20+ seconds *during normal operation*, so a
+ * session essentially never survived long enough to finish the descriptor
+ * blob and reach authentication. This constant is deliberately separate,
+ * much larger, and wall-clock-based (not a poll-count) so it stays correct
+ * if MLINK_USB_READ_TIMEOUT_USEC or poll_interval ever change. 90s matches
+ * the "device can legitimately go silent for 90+ seconds" figure already
+ * observed and documented in this driver's development history; re-tune
+ * against measured reconnect-frequency/depth data, not this comment. */
+#define MLINK_USB_MIDSESSION_IDLE_SEC	90
+
 /* How stale a standard-HID-PDC fallback snapshot is allowed
  * to be before it's still considered good enough to publish. Those
  * reports arrive roughly once a second when the device is behaving
@@ -83,17 +113,55 @@ upsdrv_info_t upsdrv_info = {
 #define MLINK_HID_FALLBACK_MAX_AGE_SEC	10
 /* How long to wait between individual Microlink session-start probes when
  * retrying from upsdrv_updateinfo() after a fallback start. Each probe
- * sends one INIT_BYTE and listens for up to MLINK_USB_READ_TIMEOUT_USEC.
- * At 1 s per probe this constant is the inter-probe gap; combined they
- * give a probe rate of 1 / (1 + MLINK_SESSION_RETRY_INTERVAL_SEC) Hz
- * (~1/6 Hz at the default 5 s). Intentionally slower than the startup
- * burst so the device gets a quiescent window to finish its own init. */
-#define MLINK_SESSION_RETRY_INTERVAL_SEC	5
-/* Seconds of continuous Microlink fallback before a USB device reset is
- * attempted. Pre-backdating microlink_fallback_since by this amount on a
- * fallback startup means the first upsdrv_updateinfo() call triggers
- * immediately rather than after another full interval of waiting. */
-#define MLINK_USB_RESET_AFTER_SEC		60
+ * sends one INIT_BYTE and listens for up to MLINK_USB_READ_TIMEOUT_USEC, so
+ * combined with that this constant gives a per-cycle time of roughly
+ * MLINK_USB_READ_TIMEOUT_USEC + this many seconds (~2 s at the default 1 s
+ * USB read timeout). Tightened from an earlier 5 s: APC's own client
+ * appears to re-probe (write) far more often than that rather than relying
+ * on any special listening trick at the transport layer - its apparent
+ * "never stalls" behavior seems to come from writing often, not from a
+ * smarter read path. This constant is the driver's equivalent knob: probe
+ * far more often than the original 5 s so a device that's only briefly
+ * reachable gets more chances to be caught, without spinning (each cycle
+ * still spends most of its time in a real blocking wait, not
+ * busy-polling). */
+#define MLINK_SESSION_RETRY_INTERVAL_SEC	1
+/* Number of consecutive failed Microlink session-start probes (spaced
+ * MLINK_SESSION_RETRY_INTERVAL_SEC apart) tolerated before a USB device
+ * reset is attempted. Counting failed probes rather than raw wall-clock
+ * seconds keeps the threshold from being thrown off by a single slow probe
+ * (each one already blocks up to MLINK_USB_READ_TIMEOUT_USEC on its own).
+ *
+ * Tried matching APC's own client's apparent default comms-timeout (about
+ * 10s) here directly - i.e. give up and USB-reset after only ~10s instead
+ * of ~120s. Tested live for 7+ hours: reset every ~13-14s, continuously,
+ * without ever completing a single session-start. That's a clean,
+ * decisive falsification - frequent bare USB resets are actively
+ * counterproductive, not just unhelpful. Back to the value that has
+ * actually connected in testing. This means APC's own client's fast
+ * recovery is NOT simply "reset the bus every 10s" - it must do something
+ * qualitatively different when it detects a lost/failed handshake; what
+ * bytes it actually sends there is still an open question worth
+ * investigating further.
+ * Real-hardware testing found this device's Microlink tunnel can
+ * legitimately go silent for 90+ seconds on its own schedule, and that an
+ * isolated USB reset issued mid-stall doesn't shorten it - so this stays
+ * tuned to stay clear of that window (target ~120 s). Re-verify the
+ * retries-per-second math against the actual observed cadence any time
+ * MLINK_SESSION_RETRY_INTERVAL_SEC, the read timeout, or the number of
+ * writes issued per retry attempt changes - don't just recompute from the
+ * nominal constants. This constant has already drifted twice from doing
+ * that math instead of measuring: 20 -> 60 assumed ~2 s/retry, measured
+ * ~1.05 s/retry (only ~63 s actual); 60 -> 115 fixed that, but then
+ * adding the MLINK_STOP_BYTE write below made each retry attempt issue
+ * two writes instead of one, which pushed the real cadence to ~1.89
+ * s/retry (~217 s actual, measured live over a 5 h run) without this
+ * constant being touched. 115 -> 64 corrects for that (64 * ~1.89 s/retry
+ * =~ 120 s). Pre-setting microlink_fallback_retries to this value on a
+ * fallback startup means the first upsdrv_updateinfo() call can try a
+ * reset immediately rather than waiting a full new window, since the
+ * startup handshake already proved the device unresponsive. */
+#define MLINK_USB_RESET_AFTER_RETRIES		64
 
 #define MLINK_DESC_OP_USAGE_SIZE	0xFC
 #define MLINK_DESC_OP_COLLECTION	0xFD
@@ -149,6 +217,7 @@ static unsigned char rxbuf[MLINK_MAX_FRAME * 2];
 static size_t rxbuf_len = 0;
 static unsigned int parsed_frames = 0;
 static unsigned int consecutive_timeouts = 0;
+static time_t last_poll_success = 0;
 static int poll_primed = 0;
 static int authentication_sent = 0;
 static microlink_page0_state_t page0;
@@ -156,6 +225,7 @@ static int descriptor_ready = 0;
 static int outlet_commands_registered = 0;
 static time_t microlink_session_next_retry = 0;
 static time_t microlink_fallback_since = 0;
+static unsigned int microlink_fallback_retries = 0;
 /* main.c's read_upsconf() applies the user's "pollinterval" ups.conf setting
  * (or its own 2s default) to the global poll_interval before calling
  * upsdrv_initinfo() - captured here so a successfully-connected session can
@@ -351,7 +421,9 @@ static uint64_t microlink_command_source_bit(microlink_command_domain_t domain)
 #ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_UNREACHABLE_CODE
 #pragma GCC diagnostic push
 #endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_SWITCH_DEFAULT
 #pragma GCC diagnostic ignored "-Wswitch-default"
+#endif
 #ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_UNREACHABLE_CODE_BREAK
 #pragma GCC diagnostic ignored "-Wunreachable-code-break"
 #endif
@@ -501,6 +573,24 @@ static unsigned int microlink_handshake_retries(void)
 	}
 #endif /* WITH_USB */
 	return MLINK_HANDSHAKE_RETRIES;
+}
+
+/* Whether an already-established session has gone quiet long enough to be
+ * torn down and restarted. USB uses a much more patient, wall-clock-based
+ * budget than the initial handshake (see MLINK_USB_MIDSESSION_IDLE_SEC);
+ * serial keeps the original poll-count behavior, since the too-short-tolerance
+ * problem was only observed and characterized on USB. */
+static int microlink_midsession_timed_out(void)
+{
+#ifdef WITH_USB
+	if (is_usb) {
+		if (last_poll_success == 0) {
+			return consecutive_timeouts >= microlink_handshake_retries();
+		}
+		return difftime(time(NULL), last_poll_success) >= MLINK_USB_MIDSESSION_IDLE_SEC;
+	}
+#endif /* WITH_USB */
+	return consecutive_timeouts >= microlink_handshake_retries();
 }
 
 static int microlink_prime_poll(void)
@@ -1988,7 +2078,9 @@ static int microlink_send_descriptor_typed_value(const microlink_desc_value_map_
 #ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_COVERED_SWITCH_DEFAULT
 # pragma GCC diagnostic ignored "-Wcovered-switch-default"
 #endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_SWITCH_ENUM
 # pragma GCC diagnostic ignored "-Wswitch-enum"
+#endif
 #ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_UNREACHABLE_CODE
 # pragma GCC diagnostic ignored "-Wunreachable-code"
 #endif
@@ -2352,6 +2444,8 @@ static int microlink_parse_descriptor(void)
 	}
 
 	descriptor_ready = 1;
+	upsdebugx(1, "microlink: STABILITY descriptor_ready usages=%zu blob_len=%zu",
+		descriptor_usage_count, descriptor_blob_len);
 	return 1;
 }
 
@@ -2572,12 +2666,20 @@ static int microlink_authenticate(void)
 	microlink_auth_update(&s0, &s1, descriptor_blob + serial_usage->data_offset, serial_usage->size);
 	microlink_auth_update(&s0, &s1, master_password, 2);
 
-	payload[0] = 0x00;
-	payload[1] = 0x00;
+	/* SPC[0:2]: our own challenge. APC's own PowerChute client draws this
+	 * from a real random source - a fixed 0x00 0x00 here made the exchange
+	 * trivially predictable and is a suspected factor in devices appearing
+	 * to "lock out" comms after a
+	 * failed auth (see the challenge-string-calculation writeup: failed
+	 * auth can lock out comms until a device reset). Not re-adding the MVR
+	 * reply-verification watch from the earlier reverted experiment - just
+	 * this randomization. */
+	payload[0] = (unsigned char)(rand() % 256);
+	payload[1] = (unsigned char)(rand() % 256);
 	payload[2] = s0;
 	payload[3] = s1;
 
-	upsdebugx(2, "microlink: sending slave password %02X %02X",
+	upsdebugx(1, "microlink: STABILITY auth_sent %02X %02X",
 		payload[2], payload[3]);
 
 	return microlink_send_descriptor_write(
@@ -2682,6 +2784,7 @@ static int microlink_poll_once(void)
 
 	if (microlink_receive_once()) {
 		consecutive_timeouts = 0;
+		last_poll_success = time(NULL);
 		poll_primed = 0;
 		return 1;
 	}
@@ -2713,13 +2816,26 @@ static int microlink_start_session_impl(unsigned int max_attempts)
 	}
 
 	for (attempt = 0; attempt < max_attempts; attempt++) {
+		/* PowerChute's own comms-lost recovery (MicroLinkTranslator.
+		 * sendStop()/sendNak()) always sends STOP immediately before NAK,
+		 * never NAK alone - see MLINK_STOP_BYTE's comment. A STOP write
+		 * failure is treated the same as an INIT_BYTE write failure
+		 * (hard I/O error, not just "no reply yet"), matching how
+		 * MLINK_INIT_BYTE's own failure is handled just below. */
+		if (!microlink_send_simple(MLINK_STOP_BYTE)) {
+			return 0;
+		}
+
 		if (!microlink_send_simple(MLINK_INIT_BYTE)) {
 			return 0;
 		}
 
 		if (microlink_receive_once()) {
 			consecutive_timeouts = 0;
+			last_poll_success = time(NULL);
 			session_ready = 1;
+			upsdebugx(1, "microlink: STABILITY session_established attempt=%u",
+				attempt + 1);
 			return microlink_prime_poll();
 		}
 	}
@@ -2734,8 +2850,10 @@ static int microlink_start_session(void)
 
 static int microlink_reconnect_session(void)
 {
-	upsdebugx(1, "microlink: reconnecting session after %u consecutive timeouts",
-		consecutive_timeouts);
+	upsdebugx(1, "microlink: STABILITY reconnecting after %u consecutive timeouts"
+		" descriptor_usage_count=%zu descriptor_ready=%d auth_sent=%d",
+		consecutive_timeouts, descriptor_usage_count, descriptor_ready,
+		authentication_sent);
 	session_ready = 0;
 	return microlink_start_session();
 }
@@ -2980,6 +3098,9 @@ static int instcmd(const char *cmdname, const char *extra)
 void upsdrv_initups(void)
 {
 	int use_usb = 0;
+	time_t now = time(NULL);
+
+	srand((unsigned int)now);
 
 	microlink_read_config();
 
@@ -3127,11 +3248,15 @@ void upsdrv_initinfo(void)
 		microlink_publish_hid_fallback_inactive();
 	} else if (microlink_publish_hid_fallback()) {
 		session_ready = 0;
-		/* Pre-backdate so upsdrv_updateinfo() can try a USB reset immediately
-		 * rather than waiting a full MLINK_USB_RESET_AFTER_SEC from now: the
-		 * startup handshake already spent microlink_handshake_retries() x 1s
-		 * probing with no response, proving the device is already stalled. */
-		microlink_fallback_since = time(NULL) - MLINK_USB_RESET_AFTER_SEC;
+		/* Pre-set the failed-retry count so upsdrv_updateinfo() can try a USB
+		 * reset immediately rather than waiting for a full new window of
+		 * retries: the startup handshake already spent
+		 * microlink_handshake_retries() x 1s probing with no response,
+		 * proving the device is already stalled. Backdate microlink_fallback_since
+		 * by that same probe count too, purely so the diagnostic log message
+		 * below reports a realistic elapsed time instead of ~0s. */
+		microlink_fallback_since = time(NULL) - (time_t)microlink_handshake_retries();
+		microlink_fallback_retries = MLINK_USB_RESET_AFTER_RETRIES;
 		upslogx(LOG_WARNING, "apcmicrolink: could not complete Microlink startup on %s - "
 			"starting up with standard-HID fallback data only (ups.status/"
 			"battery.charge/battery.runtime); outlet-group data and commands "
@@ -3174,11 +3299,13 @@ void upsdrv_updateinfo(void)
 		}
 
 #ifdef WITH_USB
-		if (now - microlink_fallback_since >= MLINK_USB_RESET_AFTER_SEC) {
+		if (microlink_fallback_retries >= MLINK_USB_RESET_AFTER_RETRIES) {
 			upslogx(LOG_NOTICE, "apcmicrolink: Microlink tunnel unresponsive for "
-				"%ld s - attempting USB device reset to recover",
-				(long)(now - microlink_fallback_since));
+				"%ld s (%u consecutive failed retries) - attempting USB device "
+				"reset to recover",
+				(long)(now - microlink_fallback_since), microlink_fallback_retries);
 			microlink_fallback_since = now;
+			microlink_fallback_retries = 0;
 			tried_reset = 1;
 			if (microlink_usb_reset_and_reopen())
 				microlink_start_session();
@@ -3189,12 +3316,15 @@ void upsdrv_updateinfo(void)
 			microlink_start_session_impl(1);
 
 		if (!session_ready) {
+			if (!tried_reset)
+				microlink_fallback_retries++;
 			microlink_session_next_retry = now + MLINK_SESSION_RETRY_INTERVAL_SEC;
 			poll_interval = MLINK_SESSION_RETRY_INTERVAL_SEC;
 			microlink_datastale_or_fallback();
 			return;
 		}
 		microlink_fallback_since = 0;
+		microlink_fallback_retries = 0;
 		poll_interval = microlink_configured_poll_interval;
 	}
 
@@ -3202,7 +3332,7 @@ void upsdrv_updateinfo(void)
 		good = 1;
 	}
 
-	if (!good && consecutive_timeouts >= microlink_handshake_retries()) {
+	if (!good && microlink_midsession_timed_out()) {
 		if (!microlink_reconnect_session()) {
 			microlink_datastale_or_fallback();
 			return;
