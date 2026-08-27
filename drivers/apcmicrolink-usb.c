@@ -700,11 +700,50 @@ void microlink_usb_flush_io(void)
 		 * this function must never call libusb_handle_events*() itself -
 		 * that would make it a second caller of the event loop, the exact
 		 * pattern that caused the regression in the reverted two-thread
-		 * design (see the file header comment). */
-		pthread_mutex_lock(&async_lock);
-		async_queue_head = 0;
-		async_queue_count = 0;
-		pthread_mutex_unlock(&async_lock);
+		 * design (see the file header comment).
+		 *
+		 * This unconditionally discards *everything* queued, including any
+		 * genuine tunnel replies (report mlink_report_in) that arrived
+		 * before this call but haven't been consumed yet - and this
+		 * function is called on every microlink_start_session_impl()
+		 * attempt, i.e. every ~2s throughout any "not ready, retrying"
+		 * stretch, not just at a genuine hard-reset boundary. That directly
+		 * undermines the whole point of the async queue (surviving gaps
+		 * between foreground polls). Logging what's discarded here, since
+		 * previously this was completely silent - no way to tell whether a
+		 * "stuck" session was ever throwing away real, useful replies. */
+		{
+			unsigned int discarded_count;
+			unsigned int discarded_tunnel_reports = 0;
+
+			pthread_mutex_lock(&async_lock);
+			discarded_count = async_queue_count;
+			if (mlink_report_in != 0) {
+				unsigned int i;
+
+				for (i = 0; i < async_queue_count; i++) {
+					unsigned int slot = (async_queue_head + i) % MLINK_USB_ASYNC_QUEUE_LEN;
+
+					if (async_queue[slot].len > 0
+					&&  (int)async_queue[slot].data[0] == mlink_report_in
+					) {
+						discarded_tunnel_reports++;
+					}
+				}
+			}
+			async_queue_head = 0;
+			async_queue_count = 0;
+			pthread_mutex_unlock(&async_lock);
+
+			if (discarded_count > 0) {
+				upsdebugx(discarded_tunnel_reports > 0 ? 1 : 3,
+					"microlink_usb: flushing %u queued async report(s) "
+					"(%u were our tunnel's Input report 0x%02X) before a "
+					"fresh session attempt",
+					discarded_count, discarded_tunnel_reports,
+					(unsigned int)mlink_report_in);
+			}
+		}
 		return;
 	}
 #endif /* WITH_LIBUSB_1_0 && HAVE_PTHREAD */
