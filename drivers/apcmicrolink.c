@@ -2869,10 +2869,24 @@ static int microlink_start_session_impl(unsigned int max_attempts)
 	 * whether they were already populated - so preserving the old values
 	 * here costs nothing and only helps parsing survive the gap. */
 
+	/* Deliberately NOT calling microlink_usb_flush_io() for the USB case
+	 * here (unlike the serial ser_flush_io() below): this function runs on
+	 * every (re)connect attempt, including every retry in a "not ready
+	 * yet" loop that can span many minutes with no hard reset involved -
+	 * and flushing there unconditionally wipes the async listener's queue,
+	 * discarding any genuine tunnel replies that arrived but haven't been
+	 * read yet. Isolated reproduction (a standalone test pushing synthetic
+	 * reports into the real async_queue at the device's actual observed
+	 * burst cadence while running this real retry loop) showed 100% of
+	 * otherwise-valid replies silently lost this way - not a one-off, the
+	 * mechanism every single time. The one case this flush existed for -
+	 * clearing stale pre-reset data after a genuine hard USB reset - is
+	 * already handled by microlink_usb_async_stop() (called from
+	 * microlink_usb_reset_and_reopen()), which zeroes the same queue
+	 * counters itself; this call was redundant there and actively harmful
+	 * everywhere else. */
 #ifdef WITH_USB
-	if (is_usb) {
-		microlink_usb_flush_io();
-	} else
+	if (!is_usb)
 #endif /* WITH_USB */
 	{
 		ser_flush_io(upsfd);
