@@ -200,6 +200,14 @@ const microlink_desc_value_map_t microlink_desc_value_map[] = {
 	                                      MLINK_DESC_FIXED_POINT,   MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, NULL },
 	{ "2:4.5.42", "experimental.battery.sku",
 	                                      MLINK_DESC_STRING,        MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, NULL },
+	/* Individual battery pack serial number (distinct from
+	 * experimental.battery.sku's part/model number, and from the UPS
+	 * chassis's own ups.serial/device.serial at 2:4.9.40). Physically
+	 * confirmed against the battery compartment label on a real unit
+	 * (barcode read "9H2223X10773", matched the decoded descriptor value
+	 * exactly) - not a guess at this path's meaning. */
+	{ "2:4.5.9.40", "experimental.battery.serial",
+	                                      MLINK_DESC_STRING,        MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, NULL },
 	{ "2:4.5.48", "battery.date",        MLINK_DESC_DATE,          MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RW, MLINK_NAME_INDEX_NONE, NULL },
 	{ "2:4.5.74", "battery.lifetime.status",
 	                                      MLINK_DESC_BITFIELD_MAP,  MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, battery_lifetime_status_map },
@@ -275,6 +283,20 @@ const microlink_desc_value_map_t microlink_desc_value_map[] = {
 	                                      MLINK_DESC_FIXED_POINT,  MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, NULL },
 	{ "2:4.F.69",  "experimental.statistics.ups.totaltime",
 	                                      MLINK_DESC_FIXED_POINT,  MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, NULL },
+
+	/* Internal protocol state, not UPS telemetry - published for
+	 * troubleshooting visibility only, hence the microlink.diag namespace
+	 * rather than ups, battery, or experimental. */
+	/* This is MLINK_DESC_SLAVE_PASSWORD (see apcmicrolink.h) - the
+	 * writable register microlink_authenticate() sends its randomized
+	 * SPC challenge to. Confirmed live (2026-08-27, three separate
+	 * restarts with three different random challenges) that the device
+	 * echoes back exactly whatever was last written here - useful to see
+	 * during auth troubleshooting, but NOT by itself proof that
+	 * authentication was accepted (a device that blindly echoes any
+	 * register write would look identical). */
+	{ "2:4.8.5",   "microlink.diag.slave_password_echo",
+	                                      MLINK_DESC_HEX,          MLINK_DESC_UNSIGNED, 0, MLINK_DESC_RO, MLINK_NAME_INDEX_NONE, NULL },
 };
 
 const size_t microlink_desc_value_map_count =

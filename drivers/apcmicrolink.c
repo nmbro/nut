@@ -2710,8 +2710,8 @@ static int microlink_authenticate(void)
 	/* SPC[0:2]: our own challenge. APC's own PowerChute client draws this
 	 * from a real random source - a fixed 0x00 0x00 here made the exchange
 	 * trivially predictable and is a suspected factor in devices appearing
-	 * to "lock out" comms after a
-	 * failed auth (see the challenge-string-calculation writeup: failed
+	 * to "lock out" comms after a failed auth (see the challenge-string-
+	 * calculation writeup: failed
 	 * auth can lock out comms until a device reset). Not re-adding the MVR
 	 * reply-verification watch from the earlier reverted experiment - just
 	 * this randomization. */
