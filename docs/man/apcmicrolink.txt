@@ -111,6 +111,13 @@ same interrupt pipe, instead of letting that data go stale. The default is
 `yes`. Set to `no` to get an honest data gap instead of a value sourced
 from a different (less precise) channel than the rest of the Microlink data.
 
+*dumpmicrolinkpages*::
+Diagnostic option. Once the driver has completed a successful Microlink
+connection, log every Microlink descriptor page captured so far as raw hex
+bytes (one line per page, with its object ID and byte count), then exit
+instead of entering the normal polling loop. Intended for troubleshooting
+and reverse-engineering, not for routine use.
+
 include::nut_usb_addvars.txt[]
 
 

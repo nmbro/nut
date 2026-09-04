@@ -31,7 +31,7 @@
 #endif /* WITH_USB */
 
 #define DRIVER_NAME	"APC Microlink protocol driver"
-#define DRIVER_VERSION	"0.03"
+#define DRIVER_VERSION	"0.04"
 
 upsdrv_info_t upsdrv_info = {
 	DRIVER_NAME,
@@ -760,6 +760,33 @@ static void microlink_format_hex(const unsigned char *buf, size_t len,
 			out[pos] = '\0';
 		}
 	}
+}
+
+/* Diagnostic one-shot dump of every Microlink page captured in objects[]
+ * so far (id, byte count, raw hex), used by the "dumpmicrolinkpages" var -
+ * see its call site in upsdrv_initinfo() for why this runs once and then
+ * exits rather than folding into the normal dstate publish path. */
+static void microlink_dump_pages(void)
+{
+	unsigned int id;
+	unsigned int dumped = 0;
+	char hex[(MLINK_MAX_PAYLOAD * 3) + 1];
+
+	for (id = 0; id < 256; id++) {
+		const microlink_object_t *obj = microlink_get_object(id);
+
+		if (!obj->seen) {
+			continue;
+		}
+
+		microlink_format_hex(obj->data, obj->len, hex, sizeof(hex));
+		upslogx(LOG_NOTICE, "apcmicrolink: page 0x%02X (%u bytes): %s",
+			id, (unsigned int)obj->len, hex);
+		dumped++;
+	}
+
+	upslogx(LOG_NOTICE, "apcmicrolink: dumpmicrolinkpages: dumped %u page(s), exiting",
+		dumped);
 }
 
 static void microlink_format_ascii(const unsigned char *buf, size_t len,
@@ -3842,6 +3869,18 @@ void upsdrv_initinfo(void)
 		microlink_publish_status();
 		microlink_publish_runtime();
 		microlink_publish_hid_fallback_inactive();
+
+		if (testvar("dumpmicrolinkpages")) {
+			/* One-shot diagnostic: the session is up and objects[] holds
+			 * whatever pages the startup handshake walked, so dump them
+			 * and exit now rather than falling into the normal polling
+			 * loop. atexit(exit_upsdrv_cleanup) is already registered by
+			 * the time upsdrv_initinfo() runs, so upsdrv_cleanup() still
+			 * sends the STOP byte on the way out - same clean shutdown as
+			 * any other exit path, just skipping upsdrv_updateinfo(). */
+			microlink_dump_pages();
+			exit(EXIT_SUCCESS);
+		}
 	} else if (microlink_publish_hid_fallback()) {
 		session_ready = 0;
 		/* Backdate microlink_fallback_since by the probing time the startup
@@ -4024,6 +4063,9 @@ void upsdrv_makevartable(void)
 		"Show unmapped Microlink descriptor values (yes/no, default follows debug mode)");
 	addvar(VAR_VALUE, "cmdsrc",
 		"Microlink command source: rj45, usb, localuser, smartslot1, internalnetwork1 (default: rj45)");
+	addvar(VAR_FLAG, "dumpmicrolinkpages",
+		"Diagnostic: after a successful Microlink connection, log every "
+		"captured descriptor page as raw hex bytes, then exit");
 }
 
 void upsdrv_help(void)
