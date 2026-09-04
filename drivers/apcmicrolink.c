@@ -622,6 +622,16 @@ static void microlink_read_config(void)
 				value);
 		}
 	}
+
+	if (testvar("dumpmicrolinkpages")) {
+		/* Loud and early: the actual dump-and-exit happens later, only once
+		 * the startup handshake succeeds (which can itself take up to 90s
+		 * over USB), so anyone watching logs right after start needs to
+		 * already know this run will not settle into normal monitoring. */
+		upslogx(LOG_WARNING, "apcmicrolink: dumpmicrolinkpages is set - this UPS "
+			"will NOT be monitored; once connected, the driver will dump all "
+			"captured Microlink pages and exit instead of polling normally");
+	}
 }
 
 static int microlink_timeout_expired(const st_tree_timespec_t *start,
@@ -3878,6 +3888,8 @@ void upsdrv_initinfo(void)
 			 * the time upsdrv_initinfo() runs, so upsdrv_cleanup() still
 			 * sends the STOP byte on the way out - same clean shutdown as
 			 * any other exit path, just skipping upsdrv_updateinfo(). */
+			upslogx(LOG_WARNING, "apcmicrolink: dumpmicrolinkpages was set - "
+				"dumping pages and exiting now instead of monitoring the UPS");
 			microlink_dump_pages();
 			exit(EXIT_SUCCESS);
 		}

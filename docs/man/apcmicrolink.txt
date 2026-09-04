@@ -116,7 +116,13 @@ Diagnostic option. Once the driver has completed a successful Microlink
 connection, log every Microlink descriptor page captured so far as raw hex
 bytes (one line per page, with its object ID and byte count), then exit
 instead of entering the normal polling loop. Intended for troubleshooting
-and reverse-engineering, not for routine use.
+and reverse-engineering, not for routine use. +
++
+WARNING: The driver exits immediately after the dump and does *not* go on to
+monitor the UPS. Do not leave this option set in a production `ups.conf` --
+the driver logs a warning at startup and again just before exiting, but it
+still will not be running afterward, so `upsd`/`upsmon` will see the UPS as
+unreachable until the option is removed and the driver is restarted normally.
 
 include::nut_usb_addvars.txt[]
 
