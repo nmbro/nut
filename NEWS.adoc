@@ -873,6 +873,12 @@ https://github.com/networkupstools/nut/milestone/13
       [#3489, #3495, #3498]
     * Jenkins used as the NUT CI farm core has bumped JDK requirements for its
       controllers and build agents, `docs/config-prereqs.txt` revised.
+    * CI build matrix scenarios (Jenkins autotools builds, `ci_build.sh` with
+      `BUILD_TYPE=default-withdoc*`) now pass `--disable-spellcheck`, so their
+      `make check` no longer runs (and fails on) the documentation spellcheck.
+      Dedicated Travis CI jobs check the spelling with both a current and an
+      old (7.1, as on CentOS 7) version of the `aspell-en` dictionary. Local
+      builds keep the `configure --enable-spellcheck=auto` default.
 
 
 Release notes for NUT 2.8.5 - what's new since 2.8.4

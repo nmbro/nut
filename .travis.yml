@@ -94,13 +94,27 @@ _matrix_required_linux_pass1_quick:
         packages:
         - *deps_driverlibs
 
-  - env: BUILD_TYPE=default-spellcheck
+  # Spellcheck only runs in these dedicated jobs (other CI build types
+  # pass --disable-spellcheck so it is not part of every "make check" in
+  # the build matrices). Dictionaries differ from decade to decade, so check
+  # with both a current aspell-en and an old one: Ubuntu Trusty ships
+  # aspell-en 7.1, same as CentOS 7 (EPEL), which rejects some spellings
+  # (e.g. British ones) that newer dictionaries accept.
+  - env: NUT_MATRIX_TAG="spellcheck-aspell-en-current" BUILD_TYPE=default-spellcheck
     os: linux
+    dist: noble
     addons:
       apt:
         packages: &deps_aspell
         - aspell
         - aspell-en
+
+  - env: NUT_MATRIX_TAG="spellcheck-aspell-en-7.1" BUILD_TYPE=default-spellcheck
+    os: linux
+    dist: trusty
+    addons:
+      apt:
+        packages: *deps_aspell
 
   - env: BUILD_TYPE=default
     os: linux
