@@ -2028,6 +2028,8 @@ default|default-alldrv|default-alldrv:no-distcheck|default-all-errors|default-al
                     CONFIG_OPTS+=("--with-doc=yes")
                 fi
             fi
+            # Spelling is checked by dedicated BUILD_TYPE=default-spellcheck jobs
+            CONFIG_OPTS+=("--disable-spellcheck")
             if [ -z "${DO_CLEAN_CHECK-}" ]; then
                 # This is one of recipes where we want to
                 # keep the build products by default ;)
@@ -2043,6 +2045,8 @@ default|default-alldrv|default-alldrv:no-distcheck|default-all-errors|default-al
             else
                 CONFIG_OPTS+=("--with-doc=man")
             fi
+            # Spelling is checked by dedicated BUILD_TYPE=default-spellcheck jobs
+            CONFIG_OPTS+=("--disable-spellcheck")
             if [ -z "${DO_CLEAN_CHECK-}" ]; then
                 # This is one of recipes where we want to
                 # keep the build products by default ;)
