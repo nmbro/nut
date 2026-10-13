@@ -1124,15 +1124,15 @@ _matrix_linux:
   - *_matrix_required_linux
   - *_matrix_allowfail_linux
 
-_matrix_freebsd:
-  include: &_matrix_freebsd
-  - *_matrix_freebsd_gnustd_nowarn
-  - *_matrix_freebsd_gnustd_warn
-
 _matrix_freebsd_gnustd_warn:
   include: &_matrix_freebsd_gnustd_warn
   - *_matrix_freebsd_gnustd_warn_viable
   - *_matrix_freebsd_gnustd_warn_fatal
+
+_matrix_freebsd:
+  include: &_matrix_freebsd
+  - *_matrix_freebsd_gnustd_nowarn
+  - *_matrix_freebsd_gnustd_warn
 
 _matrix_required_freebsd:
   include: &_matrix_required_freebsd
@@ -1218,6 +1218,22 @@ _matrix_all:
   - *_matrix_osx
   - *_matrix_windows
 
+_matrix_spellcheck_test:
+  include: &_matrix_spellcheck_test
+  - env: NUT_MATRIX_TAG="spellcheck-aspell-en-current" BUILD_TYPE=default-spellcheck
+    os: linux
+    dist: noble
+    addons:
+      apt:
+        packages: *deps_aspell
+
+  - env: NUT_MATRIX_TAG="spellcheck-aspell-en-7.1" BUILD_TYPE=default-spellcheck
+    os: linux
+    dist: trusty
+    addons:
+      apt:
+        packages: *deps_aspell
+
 _matrix_master:
   include: &_matrix_master
   - *_matrix_required
@@ -1249,7 +1265,8 @@ _matrix_fixbugs:
 jobs:
   fast_finish: true
   include:
-  - *_matrix_master
+  # TEST BRANCH ONLY: just the spellcheck jobs
+  - *_matrix_spellcheck_test
 
 ###################################################################################
 # Note: "env" lines below must exactly describe a matrix option defined above
