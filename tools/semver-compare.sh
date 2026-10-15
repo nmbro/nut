@@ -23,6 +23,9 @@
 # Checked with bash 3 and 5, dash, ksh, zsh and even busybox sh;
 # OpenIndiana, FreeBSD and OpenBSD sh. Not compatible with csh and tcsh.
 
+# CI TEST ONLY, do not merge: deliberate ShellCheck findings
+if [ -n "$NUT_CI_TEST_A" -a -n "$NUT_CI_TEST_B" ]; then cd /tmp; echo $NUT_CI_TEST_A; fi
+
 LANG=C
 LC_ALL=C
 TZ=UTC

@@ -196,6 +196,7 @@ Shell script checks
 ~~~~~~~~~~~~~~~~~~~
 [[CI_shellcheck]]
 
+This is a deliberatly mispeled CI test line, do not merge.
 The `make shellcheck` recipe finds files which the `file` tool determines
 to be POSIX or Bourne-Again shell scripts, and runs them through respective
 interpreter's (`bash` or system `/bin/sh`) test mode to validate the syntax
