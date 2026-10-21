@@ -10,19 +10,29 @@ set CHERE_INVOKING=yes
 REM Start a 64-bit MSYS2 UCRT64 environment:
 set MSYSTEM=UCRT64
 REM Oh the joys of shell scripting with strings passed through CMD:
+REM The bundle gets stripped binaries; their debug information is saved
+REM into .inst-debuginfo as "*.debug" files, in the same directory layout
+REM (and top-level name) as the bundle, and published as a separate archive:
+REM unpacking both into the same place puts each "*.debug" file next to its
+REM EXE/DLL, where debuggers look for it.
 REM Note: currently Python installation path with MSYS is buggy [#1584]
 REM Time limit: see CI_DEADLINE_EPOCH in appveyor.yml
 REM The "ccache -c" after the bundle build: see 04-build_script.bat
-C:\msys64\usr\bin\bash -lc 'date -u; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if [ "$R" -le 0 ] ; then exit 124 ; fi ; if ! rm -rf ".inst" ; then echo "WARNING: Failed to clean away .inst" ; fi ; PATH="/ucrt64/lib/ccache/bin:/ucrt64/bin:$PATH" timeout -k 30 "$R" make -s -j 8 install-win-bundle DESTDIR="`pwd`/.inst/NUT-for-Windows-x86_64-SNAPSHOT-%APPVEYOR_BUILD_VERSION%" ; RES=$? ; echo "`date -u`: make install-win-bundle finished ($RES), pruning ccache..."; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if ! PATH="/ucrt64/bin:$PATH" ccache -c ; then echo "SKIP: Could not clean up ccache" ; fi ; exit "$RES" '
+C:\msys64\usr\bin\bash -lc 'date -u; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if [ "$R" -le 0 ] ; then exit 124 ; fi ; if ! rm -rf ".inst" ".inst-debuginfo" ; then echo "WARNING: Failed to clean away .inst" ; fi ; PATH="/ucrt64/lib/ccache/bin:/ucrt64/bin:$PATH" timeout -k 30 "$R" make -s -j 8 install-win-bundle DESTDIR="`pwd`/.inst/NUT-for-Windows-x86_64-SNAPSHOT-%APPVEYOR_BUILD_VERSION%" WIN_BUNDLE_DEBUGINFO_DIR="`pwd`/.inst-debuginfo/NUT-for-Windows-x86_64-SNAPSHOT-%APPVEYOR_BUILD_VERSION%" ; RES=$? ; echo "`date -u`: make install-win-bundle finished ($RES), pruning ccache..."; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if ! PATH="/ucrt64/bin:$PATH" ccache -c ; then echo "SKIP: Could not clean up ccache" ; fi ; exit "$RES" '
 if errorlevel 1 exit /b %ERRORLEVEL%
 C:\msys64\usr\bin\bash -lc 'date -u'
 pushd .inst
 if errorlevel 1 exit /b %ERRORLEVEL%
 REM 7z -snh: hoping for a version that can save hardlinks as such, and in 7z format to boot.
 REM -mx=3 -mmt=on: the default level took about 4 minutes of the CI time limit
-REM for this (debug build) archive alone. Measured on a 679 MB bundle with two
+REM for this (then unstripped debug build) archive alone. Measured on a 679 MB bundle with two
 REM threads: default 98s/52MB, -mx=3 10s/76MB, -mx=1 12s/199MB (other method).
 7z a -snh -mx=3 -mmt=on ../NUT-for-Windows-x86_64-SNAPSHOT-%APPVEYOR_BUILD_VERSION%.7z NUT*
+if errorlevel 1 exit /b %ERRORLEVEL%
+popd
+pushd .inst-debuginfo
+if errorlevel 1 exit /b %ERRORLEVEL%
+7z a -mx=3 -mmt=on ../NUT-debuginfo-for-Windows-x86_64-SNAPSHOT-%APPVEYOR_BUILD_VERSION%.7z NUT*
 if errorlevel 1 exit /b %ERRORLEVEL%
 popd
 

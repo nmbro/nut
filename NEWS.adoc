@@ -176,6 +176,8 @@ https://github.com/networkupstools/nut/milestone/13
       from NUT programs and libraries, which roughly halves the bundle. It
       can be saved separately, as a `.debug` file per stripped file, with
       `WIN_BUNDLE_DEBUGINFO_DIR=/some/dir`; `WIN_BUNDLE_STRIP=no` keeps it.
+      AppVeyor CI builds publish that debug information as an archive of
+      its own, to unpack into the same place as the binaries archive.
     * The `nutconf` tool, the only C++ program of NUT for Windows, now links
       the GCC runtime libraries statically (unless `libnutconf` is built as
       a shared library), so the bundle no longer needs to deliver the C++
