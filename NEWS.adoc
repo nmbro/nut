@@ -129,6 +129,12 @@ https://github.com/networkupstools/nut/milestone/13
       and no longer tries to use the Windows 11 `sudo` program.
     * The `ci_build.sh` script now exports custom `CFLAGS` et al also for
       MSYS2 builds with `ccache` (that problem was the `TMP` issue above).
+    * The `configure` script no longer builds the `nut-upower` driver and
+      `nut-scanner` UPower support for Windows (MinGW) by default, even if
+      GLib and GIO are available (e.g. in MSYS2): UPower is a D-Bus service
+      which Windows lacks, so `nut-scanner` only reported that it could not
+      load the library, and the NUT for Windows bundle carried the GLib DLLs
+      for nothing. An explicit `--with-upower=yes` still builds it.
     * Fixed `make install` of the `NUT-Monitor` application translations
       where `ln -s` is not available and `configure` makes copies instead
       (e.g. MinGW builds): aliases are now only made for installed files,
