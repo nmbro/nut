@@ -216,8 +216,9 @@ the majority of operations can be done (recommended) as an unprivileged user.
 pthread library
 ^^^^^^^^^^^^^^^
 
-NOTE: The MinGW distribution in Ubuntu 21.10 already includes pthread files,
-so the build instructions below were not relevant for this component.
+NOTE: Current MinGW-w64 toolchains (e.g. in Ubuntu 21.10 and newer, and in
+MSYS2) already include the `winpthreads` library, so the build instructions
+below are only relevant for very old toolchains.
 
 On older Debian systems, you can use the following packages repository:
 link:https://launchpad.net/~mingw-packages/+archive/ppa[MinGW PPA]
@@ -225,7 +226,7 @@ link:https://launchpad.net/~mingw-packages/+archive/ppa[MinGW PPA]
 However at the moment this PPA seems to be stale and serve very old packages,
 so it could be better to roll your own as detailed below.
 
-On Redhat: FIXME
+Red Hat and Fedora systems were not covered by these notes yet.
 
 ////////////////////////////////////////////////////////////////////////////////
 http://fedoraproject.org/wiki/MinGW/CrossCompilerFramework
@@ -295,12 +296,14 @@ libtool (libltdl)
 libusb
 ^^^^^^
 
-* libusb-1.0
+* libusb-1.0 (the `build-mingw-prereqs.sh` script in this directory can
+  build it for you, verifying the downloaded archive checksum; the manual
+  steps are:)
 
-	:; ( cd "$DLDIR" && wget -c https://sourceforge.net/projects/libusb/files/libusb-1.0/libusb-1.0.26/libusb-1.0.26.tar.bz2 )
+	:; ( cd "$DLDIR" && wget -c https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2 )
 	:; cd "$WSDIR"
-	:; tar xjf "$DLDIR"/libusb-1.0.26.tar.bz2
-	:; cd libusb-1.0.26
+	:; tar xjf "$DLDIR"/libusb-1.0.30.tar.bz2
+	:; cd libusb-1.0.30
 	:; ./configure --prefix="$PREFIX" $HOST_FLAG
 	:; make
 	:; sudo make install

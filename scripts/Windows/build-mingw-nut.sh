@@ -196,7 +196,7 @@ do_build_mingw_nut() {
 	# Note: _WIN32_WINNT>=0x0600 is needed for inet_ntop in mingw headers
 	# and the value 0xffff is anyway forced into some components at least
 	# by netsnmp cflags.
-	# _POSIX_THREAD_SAFE_FUNCTIONS whould help with localtime_r() gmtime_r()
+	# _POSIX_THREAD_SAFE_FUNCTIONS would help with localtime_r() gmtime_r()
 	# on recent mingw releases (as of 2019), per
 	# https://stackoverflow.com/questions/18551409/localtime-r-support-on-mingw
 	export CFLAGS+=" -D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_POSIX_THREAD_SAFE_FUNCTIONS=200112L -I${ARCH_PREFIX}/include/ -D_WIN32_WINNT=0xffff"
