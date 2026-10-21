@@ -1758,6 +1758,7 @@ if HAVE_WINDOWS
 install-win-bundle: all @dotMAKE@
 	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install
+	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install-win-bundle-prune
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install-win-bundle-thirdparty
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' WIN_BUNDLE_UCRT_DIR='$(WIN_BUNDLE_UCRT_DIR)' install-win-bundle-ucrt
 
@@ -1925,8 +1926,65 @@ install-win-bundle-thirdparty: @dotMAKE@
 	 | $(EGREP) -v "^($${relbindir}|$${relsbindir}|$${reldriverexecdir}|$${relcgiexecdir}|$${rellibexecdir})" \
 	 | ( RES=0 ; while IFS= read LINE ; do echo "$$LINE" ; RES=1; done; exit $$RES )
 
+# Remove from the bundle what only serves to build other programs against
+# NUT (static and import libraries, libtool archives, pkg-config files and
+# headers), the PyNUT module (installed for the Python of the build host,
+# and published on PyPI as "PyNUTClient" anyway), and NUT libraries which
+# no bundled program uses (e.g. the C++ libnutclient), unless a developer
+# bundle is requested with WIN_BUNDLE_DEVEL=yes (configure --with-dev too,
+# to get the headers). Runs before install-win-bundle-thirdparty, so that
+# third-party DLLs needed only by removed libraries are not bundled either.
+install-win-bundle-prune: @dotMAKE@
+	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
+	@case '$(WIN_BUNDLE_DEVEL)' in \
+	    yes|true) echo "  SKIP	'$@' : WIN_BUNDLE_DEVEL='$(WIN_BUNDLE_DEVEL)', keeping development files" >&2 ; exit 0 ;; \
+	 esac ; \
+	 cd '$(DESTDIR)' || exit ; \
+	 echo "Removing development-only files from the NUT for Windows bundle (set WIN_BUNDLE_DEVEL=yes to keep them)..." >&2 ; \
+	 if test -d './$(libdir)' ; then \
+	    find './$(libdir)' -type f \( -name '*.a' -o -name '*.la' \) | while IFS= read F ; do \
+	        echo "   PRUNE	$$F" >&2 ; rm -f "$$F" ; \
+	    done ; \
+	    if test -d './$(libdir)/pkgconfig' ; then echo "   PRUNE	./$(libdir)/pkgconfig" >&2 ; rm -rf './$(libdir)/pkgconfig' ; fi ; \
+	 fi ; \
+	 case '$(includedir)' in \
+	    ""|/) ;; \
+	    *)  if test -d './$(includedir)' ; then echo "   PRUNE	./$(includedir)" >&2 ; rm -rf './$(includedir)' ; fi ;; \
+	 esac ; \
+	 for D in '$(PYTHON_SITE_PACKAGES)' '$(PYTHON2_SITE_PACKAGES)' '$(PYTHON3_SITE_PACKAGES)' ; do \
+	    if test -z "$$D" || test ! -d "./$$D" ; then continue ; fi ; \
+	    for F in PyNUT.py test_nutclient.py __pycache__ ; do \
+	        if test -e "./$$D/$$F" ; then echo "   PRUNE	./$$D/$$F" >&2 ; rm -rf "./$$D/$$F" ; fi ; \
+	    done ; \
+	    rmdir -p "./$$D" 2>/dev/null || true ; \
+	 done ; \
+	 HAVE_OBJDUMP=false ; \
+	 if ( '$(OBJDUMP)' --version ) >/dev/null 2>/dev/null ; then HAVE_OBJDUMP=true ; fi ; \
+	 for PASS in 1 2 3 ; do \
+	 for L in './$(bindir)'/libnutclient*.dll './$(bindir)'/libnutscan*.dll './$(bindir)'/libupsclient*.dll ; do \
+	    if test ! -f "$$L" ; then continue ; fi ; \
+	    LB="`basename \"$$L\"`" ; \
+	    if find . -type f \( -iname '*.exe' -o -iname '*.dll' \) ! -name "$$LB" \
+	       | ( while IFS= read F ; do \
+	            if $$HAVE_OBJDUMP ; then \
+	                '$(OBJDUMP)' -p "$$F" 2>/dev/null | $(GREP) -i "DLL Name: *$$LB" >/dev/null && exit 0 ; \
+	            else \
+	                $(GREP) -i -F "$$LB" "$$F" >/dev/null 2>/dev/null && exit 0 ; \
+	            fi ; \
+	         done ; exit 1 ) ; \
+	    then continue ; fi ; \
+	    for X in './$(bindir)' './$(sbindir)' './$(driverexecdir)' './$(cgiexecdir)' './$(libexecdir)' ; do \
+	        if test -f "$$X/$$LB" ; then echo "   PRUNE	$$X/$$LB (no bundled program uses it)" >&2 ; rm -f "$$X/$$LB" ; fi ; \
+	    done ; \
+	 done ; \
+	 done ; \
+	 rmdir -p './$(libdir)' 2>/dev/null || true
+
 else !HAVE_WINDOWS
 install-win-bundle:
+	@echo "  SKIP	'$@' : not enabled for current build configuration"
+
+install-win-bundle-prune:
 	@echo "  SKIP	'$@' : not enabled for current build configuration"
 
 install-win-bundle-thirdparty:

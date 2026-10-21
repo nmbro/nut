@@ -154,6 +154,13 @@ https://github.com/networkupstools/nut/milestone/13
       8.1 without the UCRT update installed. Enabled by a `WIN_BUNDLE_UCRT_DIR`
       make or environment variable (a directory or `auto`), see
       `docs/config-prereqs.txt` for details and caveats.
+    * The `make install-win-bundle` recipe for NUT for Windows no longer
+      delivers files which only serve to build other programs against NUT
+      (static and import libraries, `*.la` and pkg-config files, headers),
+      the PyNUT module (installed for the build host's Python; it is
+      available from PyPI as `PyNUTClient`), nor NUT libraries which no
+      bundled program uses (e.g. the C++ `libnutclient` and the third-party
+      DLLs only it needed). `WIN_BUNDLE_DEVEL=yes` keeps them.
     * Documented the supported Windows versions (Windows 7 SP1 and newer for
       the source code, 32-bit and 64-bit, while builds with the MSYS2 UCRT64
       environment and its libraries are meant for Windows 10 and newer), C

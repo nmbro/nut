@@ -953,6 +953,15 @@ For UCRT-based builds, the Universal C Runtime DLL files from a Windows SDK
 can also be delivered this way (for Windows versions older than 10), see
 the `WIN_BUNDLE_UCRT_DIR` notes in `docs/config-prereqs.txt`.
 
+Such a bundle is meant to run NUT, so files which only serve to build other
+programs against NUT (static and import libraries, `*.la` and pkg-config
+files, headers) and NUT libraries which no bundled program uses (e.g. the
+C++ `libnutclient`) are removed from it. To keep them for a developer bundle,
+add `WIN_BUNDLE_DEVEL=yes` to that `make` command (and build NUT with the
+`configure --with-dev` option, to install the headers). The PyNUT module is
+not bundled either; it is published on PyPI as `PyNUTClient` instead, for
+use with any Python installation (`pip install PyNUTClient`).
+
 Archives with binaries built by recent iterations of continuous integration
 jobs should be available for exploration on the respective CI platforms.
 ======
