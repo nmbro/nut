@@ -692,7 +692,7 @@ int sendback(nut_ctype_t *client, const char *fmt, ...)
 	{ /* scoping */
 		char	*s = str_rtrim(ans, '\n');
 
-		upsdebugx(2, "%s: %s(): [destfd=%d] [len=%" PRIuSIZE "] ans=[%s]",
+		upsdebugx(2, "%s: %s(): [destfd=%" PRI_FD_SOCK "] [len=%" PRIuSIZE "] ans=[%s]",
 			__func__, op, client->sock_fd, len, s);
 	}
 
@@ -1196,7 +1196,7 @@ static void driver_free(void)
 	upstype_t	*ups, *unext;
 
 	for (ups = firstups; ups; ups = unext) {
-		upsdebugx(1, "%s: forgetting UPS [%s] (FD %d)",
+		upsdebugx(1, "%s: forgetting UPS [%s] (FD %" PRI_FD ")",
 			__func__, ups->name, ups->sock_fd);
 
 		unext = ups->next;
@@ -1718,11 +1718,11 @@ static void mainloop(void)
 				__func__, ups->name);
 			ups->sock_fd = sstate_connect(ups);
 			if (INVALID_FD(ups->sock_fd)) {
-				upsdebugx(1, "%s: UPS [%s] driver is still not connected (FD %d)",
+				upsdebugx(1, "%s: UPS [%s] driver is still not connected (FD %" PRI_FD ")",
 					__func__, ups->name, ups->sock_fd);
 				continue;
 			} else {
-				upsdebugx(1, "%s: UPS [%s] driver is now connected as FD %d",
+				upsdebugx(1, "%s: UPS [%s] driver is now connected as FD %" PRI_FD,
 					__func__, ups->name, ups->sock_fd);
 				/* fall through to handle it right away */
 			}
@@ -2022,11 +2022,11 @@ static void mainloop(void)
 				__func__, ups->name);
 			ups->sock_fd = sstate_connect(ups);
 			if (INVALID_FD(ups->sock_fd)) {
-				upsdebugx(1, "%s: UPS [%s] driver is still not connected (FD %d)",
+				upsdebugx(1, "%s: UPS [%s] driver is still not connected (FD %" PRI_FD ")",
 					__func__, ups->name, ups->sock_fd);
 				continue;
 			} else {
-				upsdebugx(1, "%s: UPS [%s] driver is now connected as FD %d",
+				upsdebugx(1, "%s: UPS [%s] driver is now connected as FD %" PRI_FD,
 					__func__, ups->name, ups->sock_fd);
 				/* fall through to handle it right away */
 			}
@@ -2247,7 +2247,7 @@ static void mainloop(void)
 		for (poll_TO = 0; poll_TO <= poll_TO_chunk && ret == WAIT_TIMEOUT; poll_TO += poll_TO_chunk) {
 			upsdebugx(4, "%s: chunked filedescriptor polling via %" PRIuSIZE
 				" chunks, last one sized %" PRIuSIZE
-				", with timeout of %" PRIi64 " msec per chunk",
+				", with timeout of %" PRIuDWORD " msec per chunk",
 				__func__, chunks, last_chunk, poll_TO);
 
 			for (chunk = 0; chunk < chunks; chunk++) {
@@ -2270,7 +2270,7 @@ static void mainloop(void)
 		}
 	}
 
-	upsdebugx(6, "%s: wait for filedescriptors done: %" PRIu64, __func__, ret);
+	upsdebugx(6, "%s: wait for filedescriptors done: %" PRIuDWORD, __func__, ret);
 
 	if (ret == WAIT_TIMEOUT) {
 		upsdebugx(2, "%s: wait timed out: no data available", __func__);
@@ -2282,7 +2282,7 @@ static void mainloop(void)
 		err = err; /* remove compile time warning */
 		upslog_with_errno(LOG_ERR, "%s", __func__);
 		/* Sleep to avoid insane looping: */
-		upsdebugx(2, "%s: wait failed: code 0x%" PRIx64 "; sleeping 0.1 sec and retrying the loop", __func__, err);
+		upsdebugx(2, "%s: wait failed: code 0x%" PRIxDWORD "; sleeping 0.1 sec and retrying the loop", __func__, err);
 		Sleep(100);	/* 0.1 sec */
 		return;
 	}
@@ -2292,7 +2292,7 @@ static void mainloop(void)
 	if (ret >= WAIT_ABANDONED_0 && ret <= WAIT_ABANDONED_0 + (nfds < sysmaxconn ? nfds : sysmaxconn) - 1) {
 		/* One abandoned mutex object that satisfied the wait? */
 		ret = ret - WAIT_ABANDONED_0 + chunk * sysmaxconn;
-		upsdebugx(5, "%s: got abandoned FD array item: %" PRIu64 " of %" PRIu64, __func__, ret, nfds - 1);
+		upsdebugx(5, "%s: got abandoned FD array item: %" PRIuDWORD " of %" PRIuMAX, __func__, ret, (uintmax_t)(nfds - 1));
 		/* FIXME: Should this be handled somehow? Cleanup? Abort?.. */
 	} else
 	if (ret >= WAIT_OBJECT_0 && ret <= WAIT_OBJECT_0 + (nfds < sysmaxconn ? nfds : sysmaxconn) - 1) {
@@ -2300,18 +2300,18 @@ static void mainloop(void)
 		/* Note: WAIT_OBJECT_0 may be currently defined as 0,
 		 * but docs insist on checking and shifting the range */
 		ret = ret - WAIT_OBJECT_0 + chunk * sysmaxconn;
-		upsdebugx(5, "%s: got event on FD array item: %" PRIu64 " of %" PRIu64, __func__, ret, nfds - 1);
+		upsdebugx(5, "%s: got event on FD array item: %" PRIuDWORD " of %" PRIuMAX, __func__, ret, (uintmax_t)(nfds - 1));
 	}
 #include "nut-pragmas-type-limits-end.h"
 
 	if (ret >= nfds) {
 		/* Array indexes are [0..nfds-1] */
-		upsdebugx(2, "%s: unexpected response to query about data available: %" PRIu64, __func__, ret);
+		upsdebugx(2, "%s: unexpected response to query about data available: %" PRIuDWORD, __func__, ret);
 		Sleep(100);	/* 0.1 sec */
 		return;
 	}
 
-	upsdebugx(6, "%s: requesting handler[%" PRIu64 "]", __func__, ret);
+	upsdebugx(6, "%s: requesting handler[%" PRIuDWORD "]", __func__, ret);
 	upsdebugx(6, "%s: handler.type=%d handler.data=%p", __func__, handler[ret].type, handler[ret].data);
 
 	upsdebugx(3, "%s: Incoming %s from %s [%s%sarray entry %" PRIuMAX "]",

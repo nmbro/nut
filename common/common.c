@@ -1192,7 +1192,7 @@ char * getprocname(pid_t pid)
 				__func__);
 			if (ret != procnamelen) {
 				upsdebugx(3, "%s: length mismatch getting WIN32 process info: %"
-					PRIuMAX " vs. " PRIuSIZE,
+					PRIuMAX " vs. %" PRIuSIZE,
 					__func__, (uintmax_t)ret, procnamelen);
 			}
 

@@ -110,7 +110,7 @@ udq_pipe_conn_t *upsdrvquery_connect(const char *sockfn) {
 
 	if (result == FALSE) {
 		if (nut_debug_level > 0 || nut_upsdrvquery_debug_level >= NUT_UPSDRVQUERY_DEBUG_LEVEL_CONNECT)
-			upslog_with_errno(LOG_ERR, "WaitNamedPipe (%s): %d", sockfn, GetLastError());
+			upslog_with_errno(LOG_ERR, "WaitNamedPipe (%s): %" PRIuDWORD, sockfn, GetLastError());
 		return NULL;
 	}
 
@@ -126,7 +126,7 @@ udq_pipe_conn_t *upsdrvquery_connect(const char *sockfn) {
 
 	if (conn->sockfd == INVALID_HANDLE_VALUE) {
 		if (nut_debug_level > 0 || nut_upsdrvquery_debug_level >= NUT_UPSDRVQUERY_DEBUG_LEVEL_CONNECT)
-			upslog_with_errno(LOG_ERR, "CreateFile : %d\n", GetLastError());
+			upslog_with_errno(LOG_ERR, "CreateFile : %" PRIuDWORD "\n", GetLastError());
 		free(conn);
 		return NULL;
 	}
@@ -661,14 +661,14 @@ ssize_t upsdrvquery_restore_broadcast(udq_pipe_conn_t *conn)
 
 	if (upsdrvquery_write(conn, "BROADCAST 1\n") < 0) {
 		if (nut_debug_level > 0 || nut_upsdrvquery_debug_level >= NUT_UPSDRVQUERY_DEBUG_LEVEL_DIALOG) {
-			upslog_with_errno(LOG_ERR, "%s: could not restore broadcast, write to socket [%d] failed",
+			upslog_with_errno(LOG_ERR, "%s: could not restore broadcast, write to socket [%" PRI_FD "] failed",
 				__func__, conn->sockfd);
 		}
 
 		return -1;
 	}
 
-	upsdebugx(5, "%s: restored broadcast for connection on socket [%d]",
+	upsdebugx(5, "%s: restored broadcast for connection on socket [%" PRI_FD "]",
 		__func__, conn->sockfd);
 
 	return 1;

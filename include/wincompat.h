@@ -46,6 +46,15 @@
 /* These use-cases need to be revised, maybe hushed later: */
 #define NUT_WIN32_INCOMPLETE_MAYBE_NOT_APPLICABLE()	NUT_WIN32_INCOMPLETE_DETAILED("may be not applicable to the platform")
 
+/* Printing formats for DWORD (an "unsigned long", 32 bits on all Windows
+ * builds), e.g. for GetLastError() codes: "code %" PRIuDWORD */
+#ifndef PRIuDWORD
+# define PRIuDWORD "lu"
+#endif
+#ifndef PRIxDWORD
+# define PRIxDWORD "lx"
+#endif
+
 /* This value is defined in the error.h file of the libusb-win32 sources
  * FIXME: Should only be relevant for builds WITH_LIBUSB_0_1 - #ifdef it so?
  * Conflicts with e.g. /msys64/mingw64/include/errno.h which defines it as 138

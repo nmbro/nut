@@ -627,7 +627,7 @@ void upsdrv_initups(void)
 	/* ser_set_speed returns int 0 always; fatal if ioctl fails */
 	ser_set_speed(upsfd, device_path, speed);
 
-	upsdebugx(1, "%s: opened %s speed %s upsfd %d",
+	upsdebugx(1, "%s: opened %s speed %s upsfd %" PRI_FD,
 		__func__, device_path, speed_val ? speed_val : "DEFAULT", upsfd);
 
 	upsdebugx(1, "%s: end", __func__);
