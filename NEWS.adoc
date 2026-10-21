@@ -127,8 +127,11 @@ https://github.com/networkupstools/nut/milestone/13
       `libusb` (1.0) dependency where it is not packaged (e.g. MSYS2 MINGW32
       or Linux cross-builds), verifying the downloaded archive checksum,
       and no longer tries to use the Windows 11 `sudo` program.
+    * Moved AppVeyor CI builds to the MSYS2 UCRT64 environment, since the
+      MINGW64 one no longer provides `libusb` (1.0) nor `neon` packages.
     * The `ci_build.sh` script now exports custom `CFLAGS` et al also for
-      MSYS2 builds with `ccache` (that problem was the `TMP` issue above).
+      MSYS2 builds with `ccache` (that problem was the `TMP` issue above),
+      and prefers the `ccache` symlinks of the current MSYS2 environment.
     * The `configure` script no longer builds the `nut-upower` driver and
       `nut-scanner` UPower support for Windows (MinGW) by default, even if
       GLib and GIO are available (e.g. in MSYS2): UPower is a D-Bus service

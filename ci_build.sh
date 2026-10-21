@@ -256,6 +256,12 @@ normalize_path() {
 }
 
 propose_CI_CCACHE_SYMLINKDIR() {
+    # On MSYS2, prefer the current environment (e.g. /ucrt64, /clang64,
+    # /mingw64) over others which may also be installed:
+    if [ -n "${MSYSTEM_PREFIX-}" ]; then
+        echo "${MSYSTEM_PREFIX}/lib/ccache/bin"
+    fi
+
     # This is where many symlinks like "gcc -> ../bin/ccache" reside:
     echo \
         "/usr/lib/ccache" \

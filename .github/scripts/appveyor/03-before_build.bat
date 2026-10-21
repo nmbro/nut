@@ -1,5 +1,5 @@
 REM Network UPS Tools: AppVeyor CI recipe step (see appveyor.yml), NUT for Windows
-REM with MSYS2/MinGW x64. Called by AppVeyor with the build folder as current
+REM with MSYS2 UCRT64 (x64). Called by AppVeyor with the build folder as current
 REM directory. AppVeyor checks each line of inline yml scripts, but only the
 REM exit code of a called .bat file, so we check each command here.
 REM
@@ -17,11 +17,11 @@ REM stashed version across Appveyor rebuilds.
 REM Time limit: see CI_DEADLINE_EPOCH in appveyor.yml
 REM Preserve the current working directory:
 set CHERE_INVOKING=yes
-REM Start a 64 bit Mingw environment:
-set MSYSTEM=MINGW64
+REM Start a 64-bit MSYS2 UCRT64 environment:
+set MSYSTEM=UCRT64
 REM Zero the ccache statistics (02-install.bat printed the restored ones),
 REM so that reports of later steps (05, 08, 12) count just this build:
-C:\msys64\usr\bin\bash -lc 'PATH="/mingw64/bin:$PATH" ; export PATH ; ccache -z ; true '
+C:\msys64\usr\bin\bash -lc 'PATH="/ucrt64/bin:$PATH" ; export PATH ; ccache -z ; true '
 if errorlevel 1 exit /b %ERRORLEVEL%
-C:\msys64\usr\bin\bash -lc 'date -u; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if [ "$R" -le 0 ] ; then exit 124 ; fi ; export MSYS2_PATH ; PATH="/mingw64/lib/ccache/bin:/mingw64/bin:$PATH" timeout -k 30 "$R" bash ./scripts/Windows/build-mingw-prereqs.sh'
+C:\msys64\usr\bin\bash -lc 'date -u; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if [ "$R" -le 0 ] ; then exit 124 ; fi ; export MSYS2_PATH ; PATH="/ucrt64/lib/ccache/bin:/ucrt64/bin:$PATH" timeout -k 30 "$R" bash ./scripts/Windows/build-mingw-prereqs.sh'
 if errorlevel 1 exit /b %ERRORLEVEL%

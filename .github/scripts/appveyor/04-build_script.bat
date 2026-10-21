@@ -1,5 +1,5 @@
 REM Network UPS Tools: AppVeyor CI recipe step (see appveyor.yml), NUT for Windows
-REM with MSYS2/MinGW x64. Called by AppVeyor with the build folder as current
+REM with MSYS2 UCRT64 (x64). Called by AppVeyor with the build folder as current
 REM directory. AppVeyor checks each line of inline yml scripts, but only the
 REM exit code of a called .bat file, so we check each command here.
 REM
@@ -7,15 +7,15 @@ REM Copyright (C) 2022-2026	Jim Klimov <jimklimov+nut@gmail.com>
 
 REM Preserve the current working directory:
 set CHERE_INVOKING=yes
-REM Start a 64 bit Mingw environment:
-set MSYSTEM=MINGW64
+REM Start a 64-bit MSYS2 UCRT64 environment:
+set MSYSTEM=UCRT64
 REM Note: currently we save job time and do not install asciidoc/a2x
 REM  # --with-docs="man=auto html-single=auto html-chunked=no pdf=no"
-REM The resulting configuration defaults to --prefix=/mingw{32,64}
-REM as appropriate for the platform, which ends up as a subdirectory
+REM The resulting configuration defaults to --prefix=/ucrt64 (the MSYS2
+REM environment prefix), which ends up as a subdirectory
 REM under DESTDIR when we `make install` later, and in our 7z archive.
 REM The builds are relocatable however, so end-users can extract to
-REM e.g. "C:\Program Files\NUT" and forfeit "mingwXX" part, probably,
+REM e.g. "C:\Program Files\NUT" and forfeit "ucrt64" part, probably,
 REM but this can complicate automatic relative directory resolution
 REM to find "nearby" program or configuration files (see common.c
 REM for current implementation). Hard-coded fallback strings may
@@ -26,5 +26,5 @@ REM a failed (or deadline-terminated) build right after the failing step, so
 REM this enforces ccache max_size before that. The later steps which compile
 REM tests and bundles (07-test_script.bat, 08-after_test.bat) do the same, and
 REM successful builds get it again in 12-on_success.ps1.
-C:\msys64\usr\bin\bash -lc 'date -u; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if [ "$R" -le 0 ] ; then exit 124 ; fi ; PATH="/mingw64/bin:$PATH" CI_SKIP_CHECK=true CANBUILD_WITH_LIBMODBUS_USB=yes WITH_LIBNUTPRIVATE=true NUT_SSL_VARIANTS=nss timeout -k 30 "$R" ./ci_build.sh --with-docs=no ; RES=$? ; echo "`date -u`: ci_build.sh finished ($RES), pruning ccache..."; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if ! PATH="/mingw64/bin:$PATH" ccache -c ; then echo "SKIP: Could not clean up ccache" ; fi ; exit "$RES" '
+C:\msys64\usr\bin\bash -lc 'date -u; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if [ "$R" -le 0 ] ; then exit 124 ; fi ; PATH="/ucrt64/bin:$PATH" CI_SKIP_CHECK=true CANBUILD_WITH_LIBMODBUS_USB=yes WITH_LIBNUTPRIVATE=true NUT_SSL_VARIANTS=nss timeout -k 30 "$R" ./ci_build.sh --with-docs=no ; RES=$? ; echo "`date -u`: ci_build.sh finished ($RES), pruning ccache..."; R=$(( ${CI_DEADLINE_EPOCH:-EPOCHSECONDS+3600} - EPOCHSECONDS )) ; echo "CI deadline: $R seconds left" ; if ! PATH="/ucrt64/bin:$PATH" ccache -c ; then echo "SKIP: Could not clean up ccache" ; fi ; exit "$RES" '
 if errorlevel 1 exit /b %ERRORLEVEL%

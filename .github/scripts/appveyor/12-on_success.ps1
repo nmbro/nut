@@ -1,5 +1,5 @@
 # Network UPS Tools: AppVeyor CI recipe step (see appveyor.yml), NUT for Windows
-# with MSYS2/MinGW x64: enforce ccache max_size before the cache save, and
+# with MSYS2 UCRT64 (x64): enforce ccache max_size before the cache save, and
 # report ccache statistics of this build (counters are zeroed in
 # 03-before_build.bat) in the job messages, which the GitHub notification
 # template in appveyor.yml includes for passed builds.
@@ -9,14 +9,14 @@
 # Keep the bash command free of double quotes (Windows PowerShell 5.1 mangles
 # them in native command arguments), and print everything to stdout.
 $env:CHERE_INVOKING = "yes"
-$env:MSYSTEM = "MINGW64"
+$env:MSYSTEM = "UCRT64"
 
 try {
     # AppVeyor saves the build cache right after the on_success scripts, so
     # clean up first (later steps also compiled tests and bundles after the
     # cleanup at the end of 04-build_script.bat); then the reported cache size
     # is what gets saved.
-    $out = & C:\msys64\usr\bin\bash -lc 'date -u ; PATH=/mingw64/bin:$PATH ; export PATH ; if ! ccache -c ; then echo SKIP: Could not clean up ccache ; fi ; ccache --print-stats'
+    $out = & C:\msys64\usr\bin\bash -lc 'date -u ; PATH=/ucrt64/bin:$PATH ; export PATH ; if ! ccache -c ; then echo SKIP: Could not clean up ccache ; fi ; ccache --print-stats'
     if ($LASTEXITCODE -ne 0) { throw "ccache --print-stats exited with code $LASTEXITCODE" }
     $s = @{}
     $out | ForEach-Object {

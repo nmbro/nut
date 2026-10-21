@@ -1,5 +1,5 @@
 REM Network UPS Tools: AppVeyor CI recipe step (see appveyor.yml), NUT for Windows
-REM with MSYS2/MinGW x64. Called by AppVeyor with the build folder as current
+REM with MSYS2 UCRT64 (x64). Called by AppVeyor with the build folder as current
 REM directory. AppVeyor checks each line of inline yml scripts, but only the
 REM exit code of a called .bat file, so we check each command here.
 REM
@@ -31,10 +31,10 @@ REM Without the ecosystem update above, the overhead of this step remained
 REM similar. It did however use a smaller population (via deps) and older
 REM versions of packages.
 REM Prerequisites for NUT per https://github.com/networkupstools/nut/blob/master/docs/config-prereqs.txt :
-C:\msys64\usr\bin\bash -lc "date -u; pacman --noconfirm -S --needed base-devel mingw-w64-x86_64-toolchain autoconf-wrapper automake-wrapper libtool mingw-w64-x86_64-libltdl gcc ccache mingw-w64-x86_64-ccache git aspell aspell-en python mingw-w64-x86_64-python-pygments mingw-w64-x86_64-winpthreads-git mingw-w64-x86_64-libusb mingw-w64-x86_64-libusb-compat-git mingw-w64-x86_64-neon libneon-devel mingw-w64-x86_64-libgd mingw-w64-x86_64-cppunit mingw-w64-x86_64-nss mingw-w64-x86_64-openssl"
+C:\msys64\usr\bin\bash -lc "date -u; pacman --noconfirm -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain autoconf-wrapper automake-wrapper libtool mingw-w64-ucrt-x86_64-libltdl gcc ccache mingw-w64-ucrt-x86_64-ccache git aspell aspell-en python mingw-w64-ucrt-x86_64-python-pygments mingw-w64-ucrt-x86_64-libusb mingw-w64-ucrt-x86_64-libsystre mingw-w64-ucrt-x86_64-libusb-compat mingw-w64-ucrt-x86_64-neon libneon-devel mingw-w64-ucrt-x86_64-libgd mingw-w64-ucrt-x86_64-cppunit mingw-w64-ucrt-x86_64-nss mingw-w64-ucrt-x86_64-openssl"
 if errorlevel 1 exit /b %ERRORLEVEL%
-REM SKIP mingw-w64-x86_64-libmodbus-git : we custom-build one with USB support
-REM SKIP for now NUT-Monitor prereqs (runtime Python would require somilar modules; need to fix localization builds like "fr.po"): gettext mingw-w64-x86_64-python-pyqt6
+REM SKIP mingw-w64-ucrt-x86_64-libmodbus-git : we custom-build one with USB support
+REM SKIP for now NUT-Monitor prereqs (runtime Python would require similar modules; need to fix localization builds like "fr.po"): gettext mingw-w64-ucrt-x86_64-python-pyqt6
 
 REM FIXME: Make these stats conditional for just troubleshooting sessions?
 REM  It seems the first "du" call costs us about 1-2 minutes (different runs):
@@ -43,7 +43,7 @@ REM C:\msys64\usr\bin\bash -lc "date -u; ls -la / ; du -ksx / ; date -u; du -ks 
 
 REM Preserve the current working directory:
 set CHERE_INVOKING=yes
-REM Start a 64 bit Mingw environment:
-set MSYSTEM=MINGW64
-C:\msys64\usr\bin\bash -lc 'PATH="/mingw64/bin:$PATH" ; export PATH ; pwd ; if ! ccache -sv ; then echo "SKIP: Could not query ccache stats" ; fi ; ccache -o compression=true ; echo "ccache settings: max_size=`ccache -k max_size` compression=`ccache -k compression`" ; true '
+REM Start a 64-bit MSYS2 UCRT64 environment:
+set MSYSTEM=UCRT64
+C:\msys64\usr\bin\bash -lc 'PATH="/ucrt64/bin:$PATH" ; export PATH ; pwd ; if ! ccache -sv ; then echo "SKIP: Could not query ccache stats" ; fi ; ccache -o compression=true ; echo "ccache settings: max_size=`ccache -k max_size` compression=`ccache -k compression`" ; true '
 if errorlevel 1 exit /b %ERRORLEVEL%

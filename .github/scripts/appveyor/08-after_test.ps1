@@ -1,5 +1,5 @@
 # Network UPS Tools: AppVeyor CI recipe step (see appveyor.yml), NUT for Windows
-# with MSYS2/MinGW x64: report a link to the built archive in the job messages.
+# with MSYS2 UCRT64 (x64): report a link to the built archive in the job messages.
 #
 # Copyright (C) 2022-2026	Jim Klimov <jimklimov+nut@gmail.com>
 
