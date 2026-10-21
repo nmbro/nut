@@ -3407,33 +3407,15 @@ bindings)
     fi
 
     # If detect_platform_PKG_CONFIG_PATH_and_FLAGS() customized anything here,
-    # let configure script know
-    _EXPORT_FLAGS=true
-    case "${CI_OS_NAME}" in
-        windows-msys2)
-            if [ "$HAVE_CCACHE" = yes ] ; then
-                # NO-OP: Its ccache gets confused, apparently parsing the flags as one parameter
-                #   configure:6064: checking whether the C compiler works
-                #   configure:6086: /mingw64/lib/ccache/bin/gcc  -D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_WIN32_WINNT=0xffff   conftest.c  >&5
-                #   Cannot create temporary file in C:\msys64\home\abuild\nut-win\ -D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_WIN32_WINNT=0xffff\: No such file or directory
-                # FIXME: Detect better if this bites us on the current system?
-                _EXPORT_FLAGS=false
-            fi
-            ;;
-    esac
-
-    if [ "${_EXPORT_FLAGS}" = true ] ; then
-        [ -z "${CFLAGS}" ]   || export CFLAGS
-        [ -z "${CXXFLAGS}" ] || export CXXFLAGS
-        [ -z "${CPPFLAGS}" ] || export CPPFLAGS
-        [ -z "${LDFLAGS}" ]  || export LDFLAGS
-    else
-        # NOTE: Passing via CONFIG_OPTS also fails
-        [ -z "${CFLAGS}" ]   || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export CFLAGS='${CFLAGS}'" >&2
-        [ -z "${CXXFLAGS}" ] || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export CXXFLAGS='${CXXFLAGS}'" >&2
-        [ -z "${CPPFLAGS}" ] || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export CPPFLAGS='${CPPFLAGS}'" >&2
-        [ -z "${LDFLAGS}" ]  || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export LDFLAGS='${LDFLAGS}'" >&2
-    fi
+    # let configure script know.
+    # NOTE: On MSYS2 this used to be skipped when ccache was used, due to
+    #   Cannot create temporary file in C:\...\ -D_POSIX=1 ...\: No such file or directory
+    # errors from the compiler; that was caused by the configure script itself
+    # (NUT_STASH_WARNINGS used the exported TMP variable for scratch), fixed.
+    [ -z "${CFLAGS}" ]   || export CFLAGS
+    [ -z "${CXXFLAGS}" ] || export CXXFLAGS
+    [ -z "${CPPFLAGS}" ] || export CPPFLAGS
+    [ -z "${LDFLAGS}" ]  || export LDFLAGS
 
     PATH="`echo \"${PATH}\" | normalize_path`"
     CCACHE_PATH="`echo \"${CCACHE_PATH}\" | normalize_path`"
