@@ -135,6 +135,10 @@ https://github.com/networkupstools/nut/milestone/13
       which Windows lacks, so `nut-scanner` only reported that it could not
       load the library, and the NUT for Windows bundle carried the GLib DLLs
       for nothing. An explicit `--with-upower=yes` still builds it.
+    * The check whether a PID belongs to the expected NUT program now uses
+      a Windows API method which works with the limited process access
+      rights it asks for, and logs the Windows error codes when it fails
+      (e.g. for no longer running processes, or those of other accounts).
     * Fixed `make install` of the `NUT-Monitor` application translations
       where `ln -s` is not available and `configure` makes copies instead
       (e.g. MinGW builds): aliases are now only made for installed files,
