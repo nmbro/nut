@@ -1,4 +1,4 @@
-personal_ws-1.1 en 3942 utf-8
+personal_ws-1.1 en 3945 utf-8
 AAC
 AAS
 ABI
@@ -42,6 +42,7 @@ ATT
 ATTRS
 ATX
 ATs
+AVIF
 AVL
 AVR
 AVRLCD
@@ -516,6 +517,7 @@ HC
 HDD
 HEADs
 HEHn
+HEIF
 HELn
 HFILE
 HIDIOCINITREPORT
@@ -1992,6 +1994,7 @@ cmdsrc
 cmdvartab
 cnf
 codebase
+codecs
 codepath
 coldstarts
 collectd

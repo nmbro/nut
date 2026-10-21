@@ -31,9 +31,10 @@ REM Without the ecosystem update above, the overhead of this step remained
 REM similar. It did however use a smaller population (via deps) and older
 REM versions of packages.
 REM Prerequisites for NUT per https://github.com/networkupstools/nut/blob/master/docs/config-prereqs.txt :
-C:\msys64\usr\bin\bash -lc "date -u; pacman --noconfirm -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain autoconf-wrapper automake-wrapper libtool mingw-w64-ucrt-x86_64-libltdl gcc ccache mingw-w64-ucrt-x86_64-ccache git aspell aspell-en python mingw-w64-ucrt-x86_64-python-pygments mingw-w64-ucrt-x86_64-libusb mingw-w64-ucrt-x86_64-libsystre mingw-w64-ucrt-x86_64-libusb-compat mingw-w64-ucrt-x86_64-neon libneon-devel mingw-w64-ucrt-x86_64-libgd mingw-w64-ucrt-x86_64-cppunit mingw-w64-ucrt-x86_64-nss mingw-w64-ucrt-x86_64-openssl"
+C:\msys64\usr\bin\bash -lc "date -u; pacman --noconfirm -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain autoconf-wrapper automake-wrapper libtool mingw-w64-ucrt-x86_64-libltdl gcc ccache mingw-w64-ucrt-x86_64-ccache git aspell aspell-en python mingw-w64-ucrt-x86_64-python-pygments mingw-w64-ucrt-x86_64-libusb mingw-w64-ucrt-x86_64-libsystre mingw-w64-ucrt-x86_64-libusb-compat mingw-w64-ucrt-x86_64-neon libneon-devel mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-cppunit mingw-w64-ucrt-x86_64-nss mingw-w64-ucrt-x86_64-openssl"
 if errorlevel 1 exit /b %ERRORLEVEL%
 REM SKIP mingw-w64-ucrt-x86_64-libmodbus-git : we custom-build one with USB support
+REM SKIP mingw-w64-ucrt-x86_64-libgd : we custom-build a PNG-only one for upsimage.cgi (the packaged one needs ~30 more DLLs, e.g. video codecs, at run time)
 REM SKIP for now NUT-Monitor prereqs (runtime Python would require similar modules; need to fix localization builds like "fr.po"): gettext mingw-w64-ucrt-x86_64-python-pyqt6
 
 REM FIXME: Make these stats conditional for just troubleshooting sessions?

@@ -246,6 +246,110 @@ provide_libusb() (
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
 
+provide_libgd() (
+	# A minimal libgd for the upsimage.cgi program, which only needs PNG
+	# output with built-in fonts. Packaged libgd builds (e.g. in MSYS2)
+	# typically enable all image formats, so their DLLs (and those of the
+	# codecs behind HEIF and AVIF support) would all have to be bundled
+	# with NUT for Windows, as load-time dependencies of libgd.dll.
+	# Requires libpng and zlib to be available.
+	PKGCFG_NAME="gdlib"
+	DEP_PRJNAME="libgd"
+	DEP_VERSION="2.3.3"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
+	DEP_SHA256="dd3f1f0bb016edcc0b2d082e8229c822ad1d02223511997c80461481759b1ed2"
+
+	FORCE=false
+	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
+
+	set +e
+	if [ x"$FORCE" = x"false" ] ; then
+		# TODO: Check version
+		if pkg-config --exists "$PKGCFG_NAME" ; then
+			echo "SKIP: pkg-config says '$PKGCFG_NAME' exists" >&2
+			return 0
+		fi
+
+		# Quickly install if prebuilt
+		if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+			(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+			$SUDO cp -pr ./ / && exit
+			exit 1
+		) && {
+			echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+			return 0
+		}
+		fi
+
+		# no stashed .inst; any Makefile at least?
+		if [ -s "${WSDIR}/${DEP_DIRNAME}/Makefile" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}" && $SUDO $MAKE install
+		) && {
+			echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
+			return
+		}
+		fi
+
+		# Not pre-built, fall through
+	fi
+
+	# (Re-)make and install from scratch
+	set -e
+
+	check_archive() {
+		if (command -v sha256sum) >/dev/null 2>/dev/null ; then
+			echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -)
+		else
+			echo "WARNING: sha256sum not found, can not verify ${DEP_ARCHIVE}" >&2
+		fi
+	}
+
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && check_archive ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "https://github.com/libgd/libgd/releases/download/gd-${DEP_VERSION}/${DEP_ARCHIVE}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "https://github.com/libgd/libgd/releases/download/gd-${DEP_VERSION}/${DEP_ARCHIVE}" -O "${DEP_ARCHIVE}" )
+		check_archive || { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf ${DEP_DIRNAME} || echo ""
+
+	tar xzf "$DLDIR/${DEP_ARCHIVE}" || exit
+	cd "./${DEP_DIRNAME}" || exit
+
+	date -u || true
+	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--with-png --with-zlib \
+		--without-freetype --without-fontconfig --without-raqm \
+		--without-jpeg --without-tiff --without-webp --without-xpm \
+		--without-liq --without-heif --without-avif --without-x \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	time $MAKE || exit
+
+	# Beside leaving a pre-install location for future runs,
+	# this may build some more artifacts:
+	date -u || true
+	rm -rf "`pwd`/.inst" || echo ""
+	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+
+	# Summarize what we have got
+	date -u || true
+	find ./ -type f -name "*.dll" -o -name "*.dll.a";
+
+	date -u || true
+	time $SUDO $MAKE install
+	date -u || true
+	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
+)
+
 provide_netsnmp() (
 	PKGCFG_NAME="netsnmp"
 	DEP_PRJNAME="net-snmp"
@@ -472,6 +576,9 @@ set | ${EGREP} '^(ARCH|PREFIX|PREFIX_ROOT|PATH|MAKE|MAKEFLAGS|SUDO|DLDIR|WSDIR|C
 provide_libusb "$@"
 ls -la "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
 cat "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
+provide_libgd "$@"
+ls -la "${PREFIX}/lib/pkgconfig/gdlib.pc"
+cat "${PREFIX}/lib/pkgconfig/gdlib.pc"
 provide_netsnmp "$@"
 ls -la "${PREFIX}/lib/pkgconfig/netsnmp.pc"
 cat "${PREFIX}/lib/pkgconfig/netsnmp.pc"
