@@ -51,7 +51,14 @@ prepareEnv() {
 
 	if [ -z "${SUDO-}" ] ; then
 		SUDO=" " # avoid reeval
-		if (command -v sudo) ; then SUDO="sudo" ; fi
+		if (command -v sudo) ; then
+			case "`command -v sudo`" in
+				# Windows 11 ships its own sudo.exe (in PATH under MSYS2)
+				# which is not what we want for "make install" here
+				*/[Ww][Ii][Nn][Dd][Oo][Ww][Ss]/*) ;;
+				*) SUDO="sudo" ;;
+			esac
+		fi
 	fi
 	export SUDO
 
@@ -141,6 +148,104 @@ prepareEnv() {
 }
 
 # Provide prerequisites; reentrant (quick skip if installed; quick install if built)
+provide_libusb() (
+	# Needed where not packaged, e.g. MSYS2 MINGW32 or Linux cross-builds;
+	# MSYS2 UCRT64, CLANG64 and MINGW64 ship mingw-w64-*-libusb packages.
+	# Also needed by libmodbus RTU USB support, so provide it first.
+	PKGCFG_NAME="libusb-1.0"
+	DEP_PRJNAME="libusb"
+	DEP_VERSION="1.0.30"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.bz2"
+	DEP_SHA256="fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
+
+	FORCE=false
+	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
+
+	set +e
+	if [ x"$FORCE" = x"false" ] ; then
+		# TODO: Check version
+		if pkg-config --exists "$PKGCFG_NAME" ; then
+			echo "SKIP: pkg-config says '$PKGCFG_NAME' exists" >&2
+			return 0
+		fi
+
+		# Quickly install if prebuilt
+		if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+			(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+			$SUDO cp -pr ./ / && exit
+			exit 1
+		) && {
+			echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+			return 0
+		}
+		fi
+
+		# no stashed .inst; any Makefile at least?
+		if [ -s "${WSDIR}/${DEP_DIRNAME}/Makefile" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}" && $SUDO $MAKE install
+		) && {
+			echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
+			return
+		}
+		fi
+
+		# Not pre-built, fall through
+	fi
+
+	# (Re-)make and install from scratch
+	set -e
+
+	check_archive() {
+		if (command -v sha256sum) >/dev/null 2>/dev/null ; then
+			echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -)
+		else
+			echo "WARNING: sha256sum not found, can not verify ${DEP_ARCHIVE}" >&2
+		fi
+	}
+
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && check_archive ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "https://github.com/libusb/libusb/releases/download/v${DEP_VERSION}/${DEP_ARCHIVE}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "https://github.com/libusb/libusb/releases/download/v${DEP_VERSION}/${DEP_ARCHIVE}" -O "${DEP_ARCHIVE}" )
+		check_archive || { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf ${DEP_DIRNAME} || echo ""
+
+	tar xjf "$DLDIR/${DEP_ARCHIVE}" || exit
+	cd "./${DEP_DIRNAME}" || exit
+
+	date -u || true
+	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--disable-examples-build --disable-tests-build \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	time $MAKE || exit
+
+	# Beside leaving a pre-install location for future runs,
+	# this may build some more artifacts:
+	date -u || true
+	rm -rf "`pwd`/.inst" || echo ""
+	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+
+	# Summarize what we have got
+	date -u || true
+	find ./ -type f -name "*.dll" -o -name "*.dll.a";
+
+	date -u || true
+	time $SUDO $MAKE install
+	date -u || true
+	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
+)
+
 provide_netsnmp() (
 	PKGCFG_NAME="netsnmp"
 	DEP_PRJNAME="net-snmp"
@@ -364,6 +469,9 @@ set | ${EGREP} '^(ARCH|PREFIX|PREFIX_ROOT|PATH|MAKE|MAKEFLAGS|SUDO|DLDIR|WSDIR|C
 
 # TODO: Loop, params, help, etc...
 # For now, let it pass "-f" to the builder
+provide_libusb "$@"
+ls -la "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
+cat "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
 provide_netsnmp "$@"
 ls -la "${PREFIX}/lib/pkgconfig/netsnmp.pc"
 cat "${PREFIX}/lib/pkgconfig/netsnmp.pc"
