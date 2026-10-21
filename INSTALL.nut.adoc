@@ -962,6 +962,13 @@ add `WIN_BUNDLE_DEVEL=yes` to that `make` command (and build NUT with the
 not bundled either; it is published on PyPI as `PyNUTClient` instead, for
 use with any Python installation (`pip install PyNUTClient`).
 
+The debug information is also stripped from the NUT programs and libraries
+in the bundle, which roughly halves its size. To keep it for analysis of
+crashes, add `WIN_BUNDLE_DEBUGINFO_DIR=/some/other/location` to the `make`
+command: the debug information is then saved there as a `.debug` file for
+each stripped program or library (debuggers such as `gdb` find it if it is
+placed next to that file). With `WIN_BUNDLE_STRIP=no` nothing is stripped.
+
 Archives with binaries built by recent iterations of continuous integration
 jobs should be available for exploration on the respective CI platforms.
 ======

@@ -1759,6 +1759,7 @@ install-win-bundle: all @dotMAKE@
 	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install-win-bundle-prune
+	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' WIN_BUNDLE_STRIP='$(WIN_BUNDLE_STRIP)' WIN_BUNDLE_DEBUGINFO_DIR='$(WIN_BUNDLE_DEBUGINFO_DIR)' install-win-bundle-strip
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install-win-bundle-thirdparty
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' WIN_BUNDLE_UCRT_DIR='$(WIN_BUNDLE_UCRT_DIR)' install-win-bundle-ucrt
 
@@ -1980,11 +1981,59 @@ install-win-bundle-prune: @dotMAKE@
 	 done ; \
 	 rmdir -p './$(libdir)' 2>/dev/null || true
 
+# Remove debug information from the NUT programs and libraries in the bundle
+# (about halves its size), unless WIN_BUNDLE_STRIP=no is set. If
+# WIN_BUNDLE_DEBUGINFO_DIR names a directory, the debug information is first
+# saved there as "<path in bundle>.debug" files, and each stripped file gets
+# a ".gnu_debuglink" to its one, e.g. to deliver them separately for crash
+# analysis. Runs before install-win-bundle-thirdparty, so the third-party
+# DLLs are delivered as their packages built them.
+install-win-bundle-strip: @dotMAKE@
+	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
+	@case '$(WIN_BUNDLE_STRIP)' in \
+	    no|false) echo "  SKIP	'$@' : WIN_BUNDLE_STRIP='$(WIN_BUNDLE_STRIP)', keeping debug information" >&2 ; exit 0 ;; \
+	 esac ; \
+	 STRIP='$(STRIP)' ; \
+	 if test -n "$$STRIP" && ( "$$STRIP" --version ) >/dev/null 2>/dev/null ; then : ; else \
+	    echo "  SKIP	'$@' : no usable strip program ('$(STRIP)')" >&2 ; exit 0 ; \
+	 fi ; \
+	 DBGDIR='$(WIN_BUNDLE_DEBUGINFO_DIR)' ; \
+	 OBJCOPY="" ; \
+	 if test -n "$$DBGDIR" ; then \
+	    OBJCOPY="`echo '$(OBJDUMP)' | sed 's,objdump\(\.exe\)*$$,objcopy,'`" ; \
+	    if ( "$$OBJCOPY" --version ) >/dev/null 2>/dev/null ; then : ; else \
+	        echo "ERROR: '$@' : WIN_BUNDLE_DEBUGINFO_DIR is set, but no objcopy program was found (tried '$$OBJCOPY')" >&2 ; \
+	        exit 1 ; \
+	    fi ; \
+	    mkdir -p "$$DBGDIR" && DBGDIR="`cd \"$$DBGDIR\" && pwd`" || exit ; \
+	 fi ; \
+	 cd '$(DESTDIR)' || exit ; \
+	 echo "Stripping debug information from NUT programs and libraries in the bundle$${DBGDIR:+ (saving it under $$DBGDIR)}..." >&2 ; \
+	 find . -type f \( -iname '*.exe' -o -iname '*.dll' \) | ( \
+	    N=0 ; \
+	    while IFS= read F ; do \
+	        if test -n "$$DBGDIR" ; then \
+	            mkdir -p "$$DBGDIR/`dirname \"$$F\"`" \
+	            && "$$OBJCOPY" --only-keep-debug "$$F" "$$DBGDIR/$$F.debug" \
+	            || exit ; \
+	        fi ; \
+	        "$$STRIP" --strip-debug "$$F" || exit ; \
+	        if test -n "$$DBGDIR" ; then \
+	            "$$OBJCOPY" --add-gnu-debuglink="$$DBGDIR/$$F.debug" "$$F" || exit ; \
+	        fi ; \
+	        N="`expr $$N + 1`" ; \
+	    done ; \
+	    echo "   STRIP	$$N files" >&2 \
+	 )
+
 else !HAVE_WINDOWS
 install-win-bundle:
 	@echo "  SKIP	'$@' : not enabled for current build configuration"
 
 install-win-bundle-prune:
+	@echo "  SKIP	'$@' : not enabled for current build configuration"
+
+install-win-bundle-strip:
 	@echo "  SKIP	'$@' : not enabled for current build configuration"
 
 install-win-bundle-thirdparty:
