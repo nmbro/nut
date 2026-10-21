@@ -107,6 +107,38 @@ https://github.com/networkupstools/nut/milestone/13
    and completing pending overlapped I/O before reusing its state.
    [issue #3452, PR #3560]
 
+ - NUT for Windows specific updates:
+    * Fixed `PRIuSIZE`, `PRIxSIZE` and `PRIiSIZE` for 32-bit (WIN32) builds,
+      where `size_t` is 32 bits but the macros were hard-coded to the 64-bit
+      `%ll` modifiers, garbling (or crashing on) the rest of the arguments of
+      such log and debug messages.
+    * Fixed the fallback `strptime()` implementation to use the `_tzname`
+      and `_timezone` accessors, as MinGW-w64 deprecates the `tzname` and
+      `timezone` variables for UCRT builds (which broke `--enable-Werror`).
+    * Fixed format strings which did not match the arguments on Windows
+      (`HANDLE`, `SOCKET` and `DWORD` values printed as `int`, a missing
+      argument and a missing `%`), and introduced `PRI_FD`, `PRI_FD_SOCK`,
+      `PRIuDWORD` and `PRIxDWORD` format macros for such values.
+    * Fixed `configure` script to not use `TMP` as a scratch variable when
+      stashing warning flags: it is exported e.g. on MSYS2, so compilers
+      used the custom `CFLAGS` as their temporary directory and failed with
+      "Cannot create temporary file" errors.
+    * The `scripts/Windows/build-mingw-prereqs.sh` helper can now build the
+      `libusb` (1.0) dependency where it is not packaged (e.g. MSYS2 MINGW32
+      or Linux cross-builds), verifying the downloaded archive checksum,
+      and no longer tries to use the Windows 11 `sudo` program.
+    * The `ci_build.sh` script now exports custom `CFLAGS` et al also for
+      MSYS2 builds with `ccache` (that problem was the `TMP` issue above).
+    * Fixed `make install` of the `NUT-Monitor` application translations
+      where `ln -s` is not available and `configure` makes copies instead
+      (e.g. MinGW builds): aliases are now only made for installed files,
+      and the copied `xx_YY.UTF-8` directories are removed properly.
+    * Documented the supported Windows versions (Windows 7 SP1 and newer for
+      the source code, 32-bit and 64-bit, while builds with the MSYS2 UCRT64
+      environment and its libraries are meant for Windows 10 and newer), C
+      runtime library considerations, and the current state of MSYS2
+      environments.
+
  - Introduced and intensively evolved an experimental `apcmicrolink` driver
    for devices with the APC Microlink protocol on serial port connections.
     * Initial version, tested against APC Smart-UPS 750 (SMT750RMI2UC). [PR #3406]
