@@ -1,4 +1,4 @@
-personal_ws-1.1 en 3938 utf-8
+personal_ws-1.1 en 3942 utf-8
 AAC
 AAS
 ABI
@@ -1205,6 +1205,7 @@ RatedVA
 RealSmart
 RedHat
 Redhat
+Redist
 Regados
 Reinholdtsen
 Remi
@@ -1549,6 +1550,7 @@ Ulfat
 Uncomment
 Unices
 Unitek
+UniversalCRTSdkDir
 Upsonic
 Upstreamed
 Ut
@@ -1630,6 +1632,7 @@ WinMerge
 WinNUT
 WinPower
 WinUSB
+WindowsSdkDir
 Wireshark
 Wl
 Wno
@@ -3662,6 +3665,7 @@ uc
 ucb
 ucd
 ucrt
+ucrtbase
 udev
 udevadm
 udq

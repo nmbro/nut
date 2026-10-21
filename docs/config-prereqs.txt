@@ -2008,6 +2008,52 @@ so not writable by the linker. This may cause random steps in the `configure`
 script or later during the build to fail. If that happens to you, disable the
 antivirus completely or exempt at least the NUT build area from protection.
 
+App-local UCRT for older Windows versions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Programs built against the Universal C Runtime (e.g. in MSYS2 UCRT64 and
+CLANG64 environments) need it to start. UCRT is a part of Windows 10 and
+newer; on Windows 7 SP1, 8 and 8.1 it is an update (KB2999226 and later
+ones) which is not always installed. As an alternative, the UCRT DLL files
+can be delivered "app-locally" in the same directory as each EXE file, see
+https://learn.microsoft.com/en-us/cpp/windows/universal-crt-deployment
+
+The DLL files which may be delivered this way (`ucrtbase.dll` and the
+`api-ms-win-*.dll` forwarders) come with the Windows 10 or Windows 11 SDK,
+in a directory like
+`C:\Program Files (x86)\Windows Kits\10\Redist\<SDK version>\ucrt\DLLs\x64`
+(`x86` for 32-bit builds; older SDK versions lack the `<SDK version>` part).
+They are not a part of MSYS2 nor mingw packages, so `make install-win-bundle`
+only delivers them when asked to, with a `WIN_BUNDLE_UCRT_DIR` make (or
+environment) variable set to either such directory, or to `auto` to look
+for an installed SDK (using `UniversalCRTSdkDir` or `WindowsSdkDir`
+environment variables, if set, or the default installation location):
+
+----
+:; make install-win-bundle DESTDIR=/c/NUT4Win WIN_BUNDLE_UCRT_DIR=auto
+----
+
+The DLL files are only copied if the installed programs import UCRT, so
+the setting is harmless for MSVCRT builds. An explicitly specified directory
+without `ucrtbase.dll` is an error, while `auto` only warns if no SDK was
+found.
+
+Keep in mind that:
+
+* On Windows 10 and newer, the system UCRT is always used, even if a copy
+  is delivered next to the program, so the copy only matters for older
+  Windows versions. Windows 7 requires the Service Pack 1.
+* This only provides the C runtime library. The third-party libraries in
+  the bundle (e.g. from MSYS2 UCRT64 packages, which target Windows 10 and
+  newer) may still need system APIs which older Windows versions lack.
+* Microsoft does not recommend the app-local deployment, for performance
+  and security reasons (e.g. such a copy is not updated by Windows Update),
+  and prefers the central deployment of UCRT.
+* Only the files named in the `Redist.txt` list (or the online "REDIST list")
+  of the Windows SDK which they came from may be redistributed, under its
+  license terms; check them for your SDK version before you publish such
+  a bundle.
+
 Windows with mingw
 ^^^^^^^^^^^^^^^^^^
 
