@@ -172,6 +172,11 @@ https://github.com/networkupstools/nut/milestone/13
       available from PyPI as `PyNUTClient`), nor NUT libraries which no
       bundled program uses (e.g. the C++ `libnutclient` and the third-party
       DLLs only it needed). `WIN_BUNDLE_DEVEL=yes` keeps them.
+    * The `nutconf` tool, the only C++ program of NUT for Windows, now links
+      the GCC runtime libraries statically (unless `libnutconf` is built as
+      a shared library), so the bundle no longer needs to deliver the C++
+      standard library DLL (over 2.5 MB) and, for 64-bit builds, the GCC
+      support library DLL for it.
     * Documented the supported Windows versions (Windows 7 SP1 and newer for
       the source code, 32-bit and 64-bit, while builds with the MSYS2 UCRT64
       environment and its libraries are meant for Windows 10 and newer), C
