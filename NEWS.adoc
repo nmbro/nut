@@ -143,6 +143,11 @@ https://github.com/networkupstools/nut/milestone/13
       where `ln -s` is not available and `configure` makes copies instead
       (e.g. MinGW builds): aliases are now only made for installed files,
       and the copied `xx_YY.UTF-8` directories are removed properly.
+    * The `make install-win-bundle` recipe no longer fails when the
+      `sbindir`, driver or `libexecdir` locations were not created by the
+      installation (e.g. nothing is installed into `libexec` with
+      `configure --prefix=/` on MSYS2), as was already handled for the
+      CGI programs location.
     * Documented the supported Windows versions (Windows 7 SP1 and newer for
       the source code, 32-bit and 64-bit, while builds with the MSYS2 UCRT64
       environment and its libraries are meant for Windows 10 and newer), C

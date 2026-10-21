@@ -1785,7 +1785,8 @@ install-win-bundle-thirdparty: @dotMAKE@
 	        cp -pf "$$D" './$(bindir)/' ; \
 	    done ; \
 	 ) || exit ; \
-	 (  if test x"$(bindir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
+	 (  if test -z "$(sbindir)" -o ! -d "$(DESTDIR)/$(sbindir)" ; then exit 0 ; fi ; \
+	    if test x"$(bindir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
 	    cd '$(DESTDIR)/$(sbindir)' || exit ; \
 	    GREP='$(GREP)' EGREP='$(EGREP)' \
 	    '$(abs_top_srcdir)/scripts/Windows/dllldd.sh' dllldddir . \
@@ -1794,7 +1795,8 @@ install-win-bundle-thirdparty: @dotMAKE@
 	        ln -f '$(DESTDIR)/$(bindir)'/"`basename \"$$D\"`" ./ ; \
 	    done ; \
 	 ) || exit ; \
-	 (  if test x"$(driverexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
+	 (  if test -z "$(driverexecdir)" -o ! -d "$(DESTDIR)/$(driverexecdir)" ; then exit 0 ; fi ; \
+	    if test x"$(driverexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
 	    if test x"$(driverexecdir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
 	    cd '$(DESTDIR)/$(driverexecdir)' || exit ; \
 	    GREP='$(GREP)' EGREP='$(EGREP)' \
@@ -1816,7 +1818,8 @@ install-win-bundle-thirdparty: @dotMAKE@
 	        ln -f '$(DESTDIR)/$(bindir)'/"`basename \"$$D\"`" ./ ; \
 	    done ; \
 	 ) || exit ; \
-	 (  if test x"$(libexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
+	 (  if test -z "$(libexecdir)" -o ! -d "$(DESTDIR)/$(libexecdir)" ; then exit 0 ; fi ; \
+	    if test x"$(libexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
 	    if test x"$(libexecdir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
 	    if test x"$(libexecdir)" = x"$(driverexecdir)" ; then exit 0 ; fi ; \
 	    if test x"$(libexecdir)" = x"$(cgiexecdir)" ; then exit 0 ; fi ; \
