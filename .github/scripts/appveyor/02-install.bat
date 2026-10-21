@@ -31,9 +31,13 @@ REM Without the ecosystem update above, the overhead of this step remained
 REM similar. It did however use a smaller population (via deps) and older
 REM versions of packages.
 REM Prerequisites for NUT per https://github.com/networkupstools/nut/blob/master/docs/config-prereqs.txt :
-C:\msys64\usr\bin\bash -lc "date -u; pacman --noconfirm -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain autoconf-wrapper automake-wrapper libtool mingw-w64-ucrt-x86_64-libltdl gcc ccache mingw-w64-ucrt-x86_64-ccache git aspell aspell-en python mingw-w64-ucrt-x86_64-python-pygments mingw-w64-ucrt-x86_64-libusb mingw-w64-ucrt-x86_64-libsystre mingw-w64-ucrt-x86_64-libusb-compat mingw-w64-ucrt-x86_64-neon libneon-devel mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-cppunit mingw-w64-ucrt-x86_64-nss mingw-w64-ucrt-x86_64-openssl"
+C:\msys64\usr\bin\bash -lc "date -u; pacman --noconfirm -S --needed base-devel mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-crt mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-headers mingw-w64-ucrt-x86_64-libgomp mingw-w64-ucrt-x86_64-libstdc++ mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-make mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-winpthreads autoconf-wrapper automake-wrapper libtool mingw-w64-ucrt-x86_64-libltdl mingw-w64-ucrt-x86_64-ccache git aspell aspell-en python mingw-w64-ucrt-x86_64-libusb mingw-w64-ucrt-x86_64-libsystre mingw-w64-ucrt-x86_64-neon mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-cppunit mingw-w64-ucrt-x86_64-nss mingw-w64-ucrt-x86_64-openssl"
 if errorlevel 1 exit /b %ERRORLEVEL%
 REM SKIP mingw-w64-ucrt-x86_64-libmodbus-git : we custom-build one with USB support
+REM SKIP mingw-w64-ucrt-x86_64-gdb mingw-w64-ucrt-x86_64-gdb-multiarch : part of the "toolchain" group (listed above without them), no debugger is used in CI
+REM SKIP gcc ccache libneon-devel : MSYS environment variants, NUT and its prerequisites are built with the UCRT64 ones
+REM SKIP mingw-w64-ucrt-x86_64-python-pygments : only highlights sources in docs, which CI builds without (the MSYS python suffices for the tests)
+REM SKIP mingw-w64-ucrt-x86_64-libusb-compat : libusb-0.1 API, NUT for Windows uses libusb-1.0
 REM SKIP mingw-w64-ucrt-x86_64-libgd : we custom-build a PNG-only one for upsimage.cgi (the packaged one needs ~30 more DLLs, e.g. video codecs, at run time)
 REM SKIP for now NUT-Monitor prereqs (runtime Python would require similar modules; need to fix localization builds like "fr.po"): gettext mingw-w64-ucrt-x86_64-python-pyqt6
 
