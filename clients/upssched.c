@@ -1361,7 +1361,7 @@ static int sock_read(conn_t *conn)
 		return 1;	/* we did some work */
 	}
 
-	upsdebug_with_errno(6, "sock_read() from fd %d returned nothing "
+	upsdebug_with_errno(6, "sock_read() from fd %" PRI_FD " returned nothing "
 		"(maybe still collecting the command line); ", conn->fd);
 
 	return 0;	/* fell out without parsing anything */

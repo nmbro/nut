@@ -285,7 +285,7 @@ static DWORD test_powerdownflag(void)
 		res = GetExitCodeProcess(ProcessInformation.hProcess, &status);
 		if (res != 0) {
 			if (status != STILL_ACTIVE) {
-				upsdebugx(1, "%s: powerdownflag check returned: %d", __func__, status);
+				upsdebugx(1, "%s: powerdownflag check returned: %" PRIuDWORD, __func__, status);
 				return status;
 			}
 		}
@@ -563,7 +563,7 @@ static void ReportSvcStatus(
 	SvcStatus.dwWaitHint = WaitHint;
 
 	/* FIXME: Find a way to stringify? */
-	upsdebugx(2, "%s: reporting transition to status %d", __func__, CurrentState);
+	upsdebugx(2, "%s: reporting transition to status %" PRIuDWORD, __func__, CurrentState);
 
 	if (CurrentState == SERVICE_START_PENDING)
 		SvcStatus.dwControlsAccepted = 0;

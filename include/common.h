@@ -152,6 +152,8 @@ extern "C" {
 # define TYPE_FD int
 # define ERROR_FD (-1)
 # define VALID_FD(a) ((a)>=0)
+/* Printing format for TYPE_FD, e.g. "FD %" PRI_FD */
+# define PRI_FD "d"
 
 /* Type of what NUT serial/SHUT methods juggle: */
 # define TYPE_FD_SER TYPE_FD
@@ -162,6 +164,7 @@ extern "C" {
 # define TYPE_FD_SOCK TYPE_FD
 # define ERROR_FD_SOCK ERROR_FD
 # define VALID_FD_SOCK(a) VALID_FD(a)
+# define PRI_FD_SOCK PRI_FD
 
 #else	/* WIN32 */
 
@@ -172,6 +175,8 @@ extern "C" {
 # define TYPE_FD HANDLE
 # define ERROR_FD (INVALID_HANDLE_VALUE)
 # define VALID_FD(a) ((a)!=INVALID_HANDLE_VALUE)
+/* HANDLE is a "void *" so this needs no cast */
+# define PRI_FD "p"
 
 # ifndef INVALID_SOCKET
 #  define INVALID_SOCKET ((SOCKET)(-1))
@@ -185,6 +190,8 @@ extern "C" {
  * in existing headers) nor generally negative values, as in Unix socket API.
  */
 # define VALID_FD_SOCK(a) ((a)!=INVALID_SOCKET)
+/* SOCKET is a UINT_PTR, same type as uintptr_t */
+# define PRI_FD_SOCK PRIuPTR
 
 typedef struct serial_handler_s {
 	HANDLE handle;

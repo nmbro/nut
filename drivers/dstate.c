@@ -296,7 +296,7 @@ static void sock_disconnect(conn_t *conn)
 	if (conn->fd != INVALID_HANDLE_VALUE) {
 		upsdebugx(3, "%s: disconnecting named pipe handle %p", __func__, conn->fd);
 		if (DisconnectNamedPipe(conn->fd) == 0)
-			upsdebug_with_errno(3, "%s: DisconnectNamedPipe failed");
+			upsdebug_with_errno(3, "%s: DisconnectNamedPipe failed", __func__);
 		upsdebugx(4, "%s: closing named pipe handle %p", __func__, conn->fd);
 		CloseHandle(conn->fd);
 		conn->fd = INVALID_HANDLE_VALUE;
@@ -412,7 +412,7 @@ static void send_to_all(const char *fmt, ...)
 			dstate_setinfo("driver.parameter.synchronous", "%s",
 				(do_synchronous==1)?"yes":((do_synchronous==0)?"no":"auto"));
 		} else {
-			upsdebugx(6, "%s: write %" PRIuSIZE " bytes to socket %d succeeded "
+			upsdebugx(6, "%s: write %" PRIuSIZE " bytes to socket %" PRI_FD " succeeded "
 				"(ret=%" PRIiSIZE "):",
 				__func__, buflen, conn->fd, ret);
 			upsdebug_ascii_compact(6, "send_to_all: buffer content: ", buf, buflen);
