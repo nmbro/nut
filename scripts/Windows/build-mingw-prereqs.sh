@@ -345,6 +345,108 @@ provide_cppunit() (
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
 
+provide_neon() (
+	# HTTP/WebDAV client library for the netxml-ups driver and the XML/HTTP
+	# scan of nut-scanner; needed where not packaged, e.g. MSYS2 MINGW32 or
+	# Linux cross-builds (MSYS2 UCRT64, CLANG64 and MINGW64 ship packages).
+	# Requires OpenSSL and expat. Built without NLS (gettext is not packaged
+	# for MSYS2 MINGW32 either), and without a built-in CA bundle path: that
+	# of the build host would not exist on the systems running NUT.
+	PKGCFG_NAME="neon"
+	DEP_PRJNAME="neon"
+	DEP_VERSION="0.37.1"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
+	DEP_SHA256="a99b7262525a454d1065cf76dd17240fd808dfc4ef15636990ff83a5d0d9e740"
+
+	FORCE=false
+	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
+
+	set +e
+	if [ x"$FORCE" = x"false" ] ; then
+		# TODO: Check version
+		if pkg-config --exists "$PKGCFG_NAME" ; then
+			echo "SKIP: pkg-config says '$PKGCFG_NAME' exists" >&2
+			return 0
+		fi
+
+		# Quickly install if prebuilt
+		if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+			(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+			$SUDO cp -pr ./ / && exit
+			exit 1
+		) && {
+			echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+			return 0
+		}
+		fi
+
+		# no stashed .inst; any Makefile at least?
+		if [ -s "${WSDIR}/${DEP_DIRNAME}/Makefile" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}" && $SUDO $MAKE install
+		) && {
+			echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
+			return
+		}
+		fi
+
+		# Not pre-built, fall through
+	fi
+
+	# (Re-)make and install from scratch
+	set -e
+
+	check_archive() {
+		if (command -v sha256sum) >/dev/null 2>/dev/null ; then
+			echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -)
+		else
+			echo "WARNING: sha256sum not found, can not verify ${DEP_ARCHIVE}" >&2
+		fi
+	}
+
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && check_archive ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "https://notroj.github.io/neon/${DEP_ARCHIVE}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "https://notroj.github.io/neon/${DEP_ARCHIVE}" -O "${DEP_ARCHIVE}" )
+		check_archive || { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf ${DEP_DIRNAME} || echo ""
+
+	tar xzf "$DLDIR/${DEP_ARCHIVE}" || exit
+	cd "./${DEP_DIRNAME}" || exit
+
+	date -u || true
+	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--with-ssl=openssl --with-expat --disable-nls \
+		--enable-shared --disable-static \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	time $MAKE || exit
+
+	# Beside leaving a pre-install location for future runs,
+	# this may build some more artifacts:
+	date -u || true
+	rm -rf "`pwd`/.inst" || echo ""
+	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+
+	# Summarize what we have got
+	date -u || true
+	find ./ -type f -name "*.dll" -o -name "*.dll.a";
+
+	date -u || true
+	time $SUDO $MAKE install
+	date -u || true
+	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
+)
+
 provide_libgd() (
 	# A minimal libgd for the upsimage.cgi program, which only needs PNG
 	# output with built-in fonts. Packaged libgd builds (e.g. in MSYS2)
@@ -678,6 +780,9 @@ cat "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
 provide_cppunit "$@"
 ls -la "${PREFIX}/lib/pkgconfig/cppunit.pc"
 cat "${PREFIX}/lib/pkgconfig/cppunit.pc"
+provide_neon "$@"
+ls -la "${PREFIX}/lib/pkgconfig/neon.pc"
+cat "${PREFIX}/lib/pkgconfig/neon.pc"
 provide_libgd "$@"
 ls -la "${PREFIX}/lib/pkgconfig/gdlib.pc"
 cat "${PREFIX}/lib/pkgconfig/gdlib.pc"

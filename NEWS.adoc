@@ -131,7 +131,8 @@ https://github.com/networkupstools/nut/milestone/13
       AppVeyor CI builds: the MSYS2 package needs about 30 more DLLs (e.g.
       video codecs for its HEIF and AVIF support) delivered with NUT. It
       also builds `cppunit` where not packaged, so that `make check` runs
-      the C++ client library tests there too.
+      the C++ client library tests there too, and `neon` (for the
+      `netxml-ups` driver and XML/HTTP scans of `nut-scanner`).
     * Moved AppVeyor CI builds to the MSYS2 UCRT64 environment, since the
       MINGW64 one no longer provides `libusb` (1.0) nor `neon` packages.
       They also no longer install MSYS2 packages which they do not use
