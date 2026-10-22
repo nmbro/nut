@@ -1758,7 +1758,92 @@ if HAVE_WINDOWS
 install-win-bundle: all @dotMAKE@
 	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install
+	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install-win-bundle-prune
+	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' WIN_BUNDLE_STRIP='$(WIN_BUNDLE_STRIP)' WIN_BUNDLE_DEBUGINFO_DIR='$(WIN_BUNDLE_DEBUGINFO_DIR)' install-win-bundle-strip
 	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' install-win-bundle-thirdparty
+	+$(MAKE) $(AM_MAKEFLAGS) DESTDIR='$(DESTDIR)' WIN_BUNDLE_UCRT_DIR='$(WIN_BUNDLE_UCRT_DIR)' install-win-bundle-ucrt
+
+# Optionally deliver the Universal C Runtime (UCRT) DLLs "app-locally" next to
+# the EXE files of a UCRT-based build (e.g. MSYS2 UCRT64 or CLANG64), so that
+# the bundle can start on Windows 7 SP1, 8 and 8.1 without the UCRT update
+# (KB2999226) installed. Windows 10 and newer always use their system UCRT.
+# The redistributable DLLs come with the Windows 10/11 SDK, so are not part
+# of the build environment: set WIN_BUNDLE_UCRT_DIR (as a make or environment
+# variable) to the "Redist/ucrt/DLLs/<arch>" directory of an SDK, or to "auto"
+# to look for an installed SDK. Not set (or "no") means to not deliver them.
+# The DLLs are copied to bindir and hard-linked to other directories with
+# EXE files, like other bundled DLLs: before Windows 8 the forwarder DLLs
+# only work in the same directory as the program which uses them.
+install-win-bundle-ucrt: @dotMAKE@
+	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
+	@UCRT_DIR='$(WIN_BUNDLE_UCRT_DIR)' ; \
+	 case "$$UCRT_DIR" in \
+	    ""|no|false) echo "  SKIP	'$@' : WIN_BUNDLE_UCRT_DIR is not set" >&2 ; exit 0 ;; \
+	 esac ; \
+	 cd '$(DESTDIR)/$(bindir)' || exit ; \
+	 UCRT_REGEX='(api-ms-win-crt-[^ ]*|ucrtbase)\.dll' ; \
+	 IS_UCRT=false ; \
+	 if ( '$(OBJDUMP)' --version ) >/dev/null 2>/dev/null ; then \
+	    if '$(OBJDUMP)' -p *.exe 2>/dev/null | $(EGREP) -i "DLL Name: *$${UCRT_REGEX}" >/dev/null ; then IS_UCRT=true ; fi ; \
+	 else \
+	    if $(EGREP) -i -l "$${UCRT_REGEX}" *.exe >/dev/null 2>/dev/null ; then IS_UCRT=true ; fi ; \
+	 fi ; \
+	 if $$IS_UCRT ; then : ; else \
+	    echo "  SKIP	'$@' : programs in '$(DESTDIR)/$(bindir)' do not use UCRT" >&2 ; \
+	    exit 0 ; \
+	 fi ; \
+	 case '$(host_cpu)' in \
+	    x86_64|amd64) UCRT_ARCH=x64 ;; \
+	    i?86) UCRT_ARCH=x86 ;; \
+	    aarch64|arm64) UCRT_ARCH=arm64 ;; \
+	    *) UCRT_ARCH='$(host_cpu)' ;; \
+	 esac ; \
+	 UCRT_AUTO=false ; \
+	 if test x"$$UCRT_DIR" = xauto || test x"$$UCRT_DIR" = xyes ; then \
+	    UCRT_AUTO=true ; \
+	    UCRT_DIR="" ; \
+	    for SDKDIR in "$${UniversalCRTSdkDir-}" "$${WindowsSdkDir-}" \
+	        "/c/Program Files (x86)/Windows Kits/10" \
+	        "/cygdrive/c/Program Files (x86)/Windows Kits/10" \
+	    ; do \
+	        test -n "$$SDKDIR" || continue ; \
+	        if (command -v cygpath) >/dev/null 2>/dev/null ; then \
+	            SDKDIR="`cygpath -u \"$$SDKDIR\"`" || continue ; \
+	        fi ; \
+	        test -d "$$SDKDIR/Redist" || continue ; \
+	        for D in "$$SDKDIR"/Redist/10.*/ucrt/DLLs/"$$UCRT_ARCH" ; do \
+	            if test -s "$$D/ucrtbase.dll" ; then UCRT_DIR="$$D" ; fi ; \
+	        done ; \
+	        if test -z "$$UCRT_DIR" && test -s "$$SDKDIR/Redist/ucrt/DLLs/$$UCRT_ARCH/ucrtbase.dll" ; then \
+	            UCRT_DIR="$$SDKDIR/Redist/ucrt/DLLs/$$UCRT_ARCH" ; \
+	        fi ; \
+	        if test -n "$$UCRT_DIR" ; then break ; fi ; \
+	    done ; \
+	 else \
+	    if test ! -s "$$UCRT_DIR/ucrtbase.dll" && test -s "$$UCRT_DIR/$$UCRT_ARCH/ucrtbase.dll" ; then \
+	        UCRT_DIR="$$UCRT_DIR/$$UCRT_ARCH" ; \
+	    fi ; \
+	 fi ; \
+	 if test -z "$$UCRT_DIR" || test ! -s "$$UCRT_DIR/ucrtbase.dll" ; then \
+	    if $$UCRT_AUTO ; then \
+	        echo "WARNING: '$@': could not find a Windows SDK with 'Redist/ucrt/DLLs/$$UCRT_ARCH', not delivering UCRT DLLs" >&2 ; \
+	        exit 0 ; \
+	    fi ; \
+	    echo "ERROR: '$@': no 'ucrtbase.dll' found in WIN_BUNDLE_UCRT_DIR='$(WIN_BUNDLE_UCRT_DIR)'" >&2 ; \
+	    exit 1 ; \
+	 fi ; \
+	 echo "Delivering app-local UCRT DLLs from '$$UCRT_DIR'..." >&2 ; \
+	 for D in "$$UCRT_DIR"/*.dll ; do \
+	    test -f "$$D" || continue ; \
+	    echo "   UCRT->bin	COPY	$$D" ; \
+	    cp -pf "$$D" ./ || exit ; \
+	    BD="`basename \"$$D\"`" ; \
+	    for DIR in '$(sbindir)' '$(driverexecdir)' '$(cgiexecdir)' '$(libexecdir)' ; do \
+	        if test -z "$$DIR" || test x"$$DIR" = x'$(bindir)' || test ! -d '$(DESTDIR)'"/$$DIR" ; then continue ; fi ; \
+	        echo "   UCRT->$$DIR	LINK	$$BD (hard link from bindir)" ; \
+	        ln -f "./$$BD" '$(DESTDIR)'"/$$DIR/" || exit ; \
+	    done ; \
+	 done
 
 install-win-bundle-thirdparty: @dotMAKE@
 	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
@@ -1785,7 +1870,8 @@ install-win-bundle-thirdparty: @dotMAKE@
 	        cp -pf "$$D" './$(bindir)/' ; \
 	    done ; \
 	 ) || exit ; \
-	 (  if test x"$(bindir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
+	 (  if test -z "$(sbindir)" -o ! -d "$(DESTDIR)/$(sbindir)" ; then exit 0 ; fi ; \
+	    if test x"$(bindir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
 	    cd '$(DESTDIR)/$(sbindir)' || exit ; \
 	    GREP='$(GREP)' EGREP='$(EGREP)' \
 	    '$(abs_top_srcdir)/scripts/Windows/dllldd.sh' dllldddir . \
@@ -1794,7 +1880,8 @@ install-win-bundle-thirdparty: @dotMAKE@
 	        ln -f '$(DESTDIR)/$(bindir)'/"`basename \"$$D\"`" ./ ; \
 	    done ; \
 	 ) || exit ; \
-	 (  if test x"$(driverexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
+	 (  if test -z "$(driverexecdir)" -o ! -d "$(DESTDIR)/$(driverexecdir)" ; then exit 0 ; fi ; \
+	    if test x"$(driverexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
 	    if test x"$(driverexecdir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
 	    cd '$(DESTDIR)/$(driverexecdir)' || exit ; \
 	    GREP='$(GREP)' EGREP='$(EGREP)' \
@@ -1816,7 +1903,8 @@ install-win-bundle-thirdparty: @dotMAKE@
 	        ln -f '$(DESTDIR)/$(bindir)'/"`basename \"$$D\"`" ./ ; \
 	    done ; \
 	 ) || exit ; \
-	 (  if test x"$(libexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
+	 (  if test -z "$(libexecdir)" -o ! -d "$(DESTDIR)/$(libexecdir)" ; then exit 0 ; fi ; \
+	    if test x"$(libexecdir)" = x"$(bindir)" ; then exit 0 ; fi ; \
 	    if test x"$(libexecdir)" = x"$(sbindir)" ; then exit 0 ; fi ; \
 	    if test x"$(libexecdir)" = x"$(driverexecdir)" ; then exit 0 ; fi ; \
 	    if test x"$(libexecdir)" = x"$(cgiexecdir)" ; then exit 0 ; fi ; \
@@ -1839,11 +1927,119 @@ install-win-bundle-thirdparty: @dotMAKE@
 	 | $(EGREP) -v "^($${relbindir}|$${relsbindir}|$${reldriverexecdir}|$${relcgiexecdir}|$${rellibexecdir})" \
 	 | ( RES=0 ; while IFS= read LINE ; do echo "$$LINE" ; RES=1; done; exit $$RES )
 
+# Remove from the bundle what only serves to build other programs against
+# NUT (static and import libraries, libtool archives, pkg-config files and
+# headers), the PyNUT module (installed for the Python of the build host,
+# and published on PyPI as "PyNUTClient" anyway), and NUT libraries which
+# no bundled program uses (e.g. the C++ libnutclient), unless a developer
+# bundle is requested with WIN_BUNDLE_DEVEL=yes (configure --with-dev too,
+# to get the headers). Runs before install-win-bundle-thirdparty, so that
+# third-party DLLs needed only by removed libraries are not bundled either.
+install-win-bundle-prune: @dotMAKE@
+	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
+	@case '$(WIN_BUNDLE_DEVEL)' in \
+	    yes|true) echo "  SKIP	'$@' : WIN_BUNDLE_DEVEL='$(WIN_BUNDLE_DEVEL)', keeping development files" >&2 ; exit 0 ;; \
+	 esac ; \
+	 cd '$(DESTDIR)' || exit ; \
+	 echo "Removing development-only files from the NUT for Windows bundle (set WIN_BUNDLE_DEVEL=yes to keep them)..." >&2 ; \
+	 if test -d './$(libdir)' ; then \
+	    find './$(libdir)' -type f \( -name '*.a' -o -name '*.la' \) | while IFS= read F ; do \
+	        echo "   PRUNE	$$F" >&2 ; rm -f "$$F" ; \
+	    done ; \
+	    if test -d './$(libdir)/pkgconfig' ; then echo "   PRUNE	./$(libdir)/pkgconfig" >&2 ; rm -rf './$(libdir)/pkgconfig' ; fi ; \
+	 fi ; \
+	 case '$(includedir)' in \
+	    ""|/) ;; \
+	    *)  if test -d './$(includedir)' ; then echo "   PRUNE	./$(includedir)" >&2 ; rm -rf './$(includedir)' ; fi ;; \
+	 esac ; \
+	 for D in '$(PYTHON_SITE_PACKAGES)' '$(PYTHON2_SITE_PACKAGES)' '$(PYTHON3_SITE_PACKAGES)' ; do \
+	    if test -z "$$D" || test ! -d "./$$D" ; then continue ; fi ; \
+	    for F in PyNUT.py test_nutclient.py __pycache__ ; do \
+	        if test -e "./$$D/$$F" ; then echo "   PRUNE	./$$D/$$F" >&2 ; rm -rf "./$$D/$$F" ; fi ; \
+	    done ; \
+	    rmdir -p "./$$D" 2>/dev/null || true ; \
+	 done ; \
+	 HAVE_OBJDUMP=false ; \
+	 if ( '$(OBJDUMP)' --version ) >/dev/null 2>/dev/null ; then HAVE_OBJDUMP=true ; fi ; \
+	 for PASS in 1 2 3 ; do \
+	 for L in './$(bindir)'/libnutclient*.dll './$(bindir)'/libnutscan*.dll './$(bindir)'/libupsclient*.dll ; do \
+	    if test ! -f "$$L" ; then continue ; fi ; \
+	    LB="`basename \"$$L\"`" ; \
+	    if find . -type f \( -iname '*.exe' -o -iname '*.dll' \) ! -name "$$LB" \
+	       | ( while IFS= read F ; do \
+	            if $$HAVE_OBJDUMP ; then \
+	                '$(OBJDUMP)' -p "$$F" 2>/dev/null | $(GREP) -i "DLL Name: *$$LB" >/dev/null && exit 0 ; \
+	            else \
+	                $(GREP) -i -F "$$LB" "$$F" >/dev/null 2>/dev/null && exit 0 ; \
+	            fi ; \
+	         done ; exit 1 ) ; \
+	    then continue ; fi ; \
+	    for X in './$(bindir)' './$(sbindir)' './$(driverexecdir)' './$(cgiexecdir)' './$(libexecdir)' ; do \
+	        if test -f "$$X/$$LB" ; then echo "   PRUNE	$$X/$$LB (no bundled program uses it)" >&2 ; rm -f "$$X/$$LB" ; fi ; \
+	    done ; \
+	 done ; \
+	 done ; \
+	 rmdir -p './$(libdir)' 2>/dev/null || true
+
+# Remove debug information from the NUT programs and libraries in the bundle
+# (about halves its size), unless WIN_BUNDLE_STRIP=no is set. If
+# WIN_BUNDLE_DEBUGINFO_DIR names a directory, the debug information is first
+# saved there as "<path in bundle>.debug" files, and each stripped file gets
+# a ".gnu_debuglink" to its one, e.g. to deliver them separately for crash
+# analysis. Runs before install-win-bundle-thirdparty, so the third-party
+# DLLs are delivered as their packages built them.
+install-win-bundle-strip: @dotMAKE@
+	@if test -z "$(DESTDIR)" ; then echo "ERROR: '$@': Bundle may only be installed to some DESTDIR prototype area'" >&2 ; exit 1; fi
+	@case '$(WIN_BUNDLE_STRIP)' in \
+	    no|false) echo "  SKIP	'$@' : WIN_BUNDLE_STRIP='$(WIN_BUNDLE_STRIP)', keeping debug information" >&2 ; exit 0 ;; \
+	 esac ; \
+	 STRIP='$(STRIP)' ; \
+	 if test -n "$$STRIP" && ( "$$STRIP" --version ) >/dev/null 2>/dev/null ; then : ; else \
+	    echo "  SKIP	'$@' : no usable strip program ('$(STRIP)')" >&2 ; exit 0 ; \
+	 fi ; \
+	 DBGDIR='$(WIN_BUNDLE_DEBUGINFO_DIR)' ; \
+	 OBJCOPY="" ; \
+	 if test -n "$$DBGDIR" ; then \
+	    OBJCOPY="`echo '$(OBJDUMP)' | sed 's,objdump\(\.exe\)*$$,objcopy,'`" ; \
+	    if ( "$$OBJCOPY" --version ) >/dev/null 2>/dev/null ; then : ; else \
+	        echo "ERROR: '$@' : WIN_BUNDLE_DEBUGINFO_DIR is set, but no objcopy program was found (tried '$$OBJCOPY')" >&2 ; \
+	        exit 1 ; \
+	    fi ; \
+	    mkdir -p "$$DBGDIR" && DBGDIR="`cd \"$$DBGDIR\" && pwd`" || exit ; \
+	 fi ; \
+	 cd '$(DESTDIR)' || exit ; \
+	 echo "Stripping debug information from NUT programs and libraries in the bundle$${DBGDIR:+ (saving it under $$DBGDIR)}..." >&2 ; \
+	 find . -type f \( -iname '*.exe' -o -iname '*.dll' \) | ( \
+	    N=0 ; \
+	    while IFS= read F ; do \
+	        if test -n "$$DBGDIR" ; then \
+	            mkdir -p "$$DBGDIR/`dirname \"$$F\"`" \
+	            && "$$OBJCOPY" --only-keep-debug "$$F" "$$DBGDIR/$$F.debug" \
+	            || exit ; \
+	        fi ; \
+	        "$$STRIP" --strip-debug "$$F" || exit ; \
+	        if test -n "$$DBGDIR" ; then \
+	            "$$OBJCOPY" --add-gnu-debuglink="$$DBGDIR/$$F.debug" "$$F" || exit ; \
+	        fi ; \
+	        N="`expr $$N + 1`" ; \
+	    done ; \
+	    echo "   STRIP	$$N files" >&2 \
+	 )
+
 else !HAVE_WINDOWS
 install-win-bundle:
 	@echo "  SKIP	'$@' : not enabled for current build configuration"
 
+install-win-bundle-prune:
+	@echo "  SKIP	'$@' : not enabled for current build configuration"
+
+install-win-bundle-strip:
+	@echo "  SKIP	'$@' : not enabled for current build configuration"
+
 install-win-bundle-thirdparty:
+	@echo "  SKIP	'$@' : not enabled for current build configuration"
+
+install-win-bundle-ucrt:
 	@echo "  SKIP	'$@' : not enabled for current build configuration"
 endif !HAVE_WINDOWS
 

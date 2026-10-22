@@ -76,6 +76,17 @@ nutconf_CXXFLAGS += -DWITH_NUTSCANNER -I$(top_srcdir)/tools/nut-scanner
 nutconf_LDADD += $(top_builddir)/tools/nut-scanner/libnutscan.la
 endif WITH_LIBLTDL
 
+# On Windows, nutconf is the only C++ program in the NUT for Windows bundle,
+# and with a private (not installed) libnutconf all of its C++ code is in this
+# one EXE, so no C++ objects or exceptions cross DLL boundaries. Link the GCC
+# runtime libraries statically then, so that the bundle does not have to
+# deliver libstdc++-6.dll (2.5+ MiB) and libgcc_s_*.dll for it alone.
+if HAVE_WINDOWS
+if !WITH_DEV_LIBNUTCONF
+nutconf_LDFLAGS = $(AM_LDFLAGS) -static-libgcc -static-libstdc++
+endif !WITH_DEV_LIBNUTCONF
+endif HAVE_WINDOWS
+
 endif WITH_NUTCONF
 
 dummy:
