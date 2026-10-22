@@ -189,19 +189,24 @@ jobs:
   # The Windows-specific code (WIN32 code paths, e.g. in common/wincompat.c,
   # the named pipes in upsd/upsmon/drivers, scripts/Windows/wininit.c) is not
   # built by the Linux "analyze" job above. Cross-compile NUT for 32-bit and
-  # 64-bit Windows with the Ubuntu mingw-w64 toolchains (GCC, which the CodeQL
+  # 64-bit Windows with the Debian mingw-w64 toolchains (GCC, which the CodeQL
   # Linux build tracer supports; see scripts/Windows/README.adoc for such
   # builds, and scripts/Windows/build-mingw-nut.sh for the flags), matching
   # the C runtimes of the NUT for Windows CI builds made semi-natively in
   # MSYS2: MSVCRT for 32-bit (MINGW32, GHA-09) and UCRT for 64-bit (UCRT64,
-  # AppVeyor). The UCRT toolchain is named x86_64-w64-mingw32ucrt; configure
-  # gets the usual host triplet, which older config.sub copies understand.
-  # Ubuntu packages no MinGW builds of most NUT dependencies, so this builds
-  # what does not need them (e.g. no SSL, USB, SNMP or nut-scanner): their
-  # platform-independent code is analyzed by the job above.
+  # AppVeyor). Debian 13 "trixie" packages the UCRT toolchain (named
+  # x86_64-w64-mingw32ucrt; configure gets the usual host triplet, which
+  # older config.sub copies understand), Ubuntu 24.04 does not.
+  # Debian packages no MinGW builds of most NUT dependencies: the regex and
+  # libusb ones are cross-built by scripts/Windows/build-mingw-prereqs.sh
+  # before the CodeQL tracing starts; NUT is built without the others (e.g.
+  # no SSL, SNMP or nut-scanner), whose platform-independent code the job
+  # above analyzes.
   analyze-windows-cross:
     name: Analyze (Windows ${{ matrix.name }}, mingw-w64 cross-build)
     runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie
     permissions:
       actions: read
       contents: read
@@ -214,27 +219,42 @@ jobs:
           - name: 'i686-msvcrt'
             host: 'i686-w64-mingw32'
             toolchain: 'i686-w64-mingw32'
-            packages: 'gcc-mingw-w64-i686 g++-mingw-w64-i686 libz-mingw-w64-dev'
+            packages: 'gcc-mingw-w64-i686 g++-mingw-w64-i686'
           - name: 'x86_64-ucrt'
             host: 'x86_64-w64-mingw32'
             toolchain: 'x86_64-w64-mingw32ucrt'
             packages: 'gcc-mingw-w64-ucrt64 g++-mingw-w64-ucrt64'
 
+    env:
+      HOST: ${{ matrix.host }}
+      TOOLCHAIN: ${{ matrix.toolchain }}
+
     steps:
+    # Before the checkout, which needs git in the container
+    - name: NUT CI Prerequisite packages (Debian, mingw-w64)
+      env:
+        MINGW_PACKAGES: ${{ matrix.packages }}
+      run: |
+        apt-get update
+        # shellcheck disable=SC2086
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ${MINGW_PACKAGES} git ca-certificates curl patch make \
+            autoconf automake libtool pkgconf python3 perl dpkg-dev
+
     - name: Checkout repository
       uses: actions/checkout@v7
       with:
         persist-credentials: false
 
-    - name: NUT CI Prerequisite packages (Ubuntu, mingw-w64)
-      env:
-        MINGW_PACKAGES: ${{ matrix.packages }}
+    # Not traced by CodeQL (third-party code)
+    - name: Cross-build the regex and libusb prerequisites
       run: |
-        echo "set man-db/auto-update false" | sudo debconf-communicate
-        sudo dpkg-reconfigure man-db
-        sudo apt-get update
-        # shellcheck disable=SC2086
-        sudo apt-get install -y ${MINGW_PACKAGES} autoconf automake libtool pkgconf python3
+        HOST_FLAG="--host=${HOST}" \
+        BUILD_FLAG="--build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE)" \
+        ARCH="${HOST}" PREFIX="/usr/${TOOLCHAIN}" SUDO=" " \
+        CC="${TOOLCHAIN}-gcc" CXX="${TOOLCHAIN}-g++" AR="${TOOLCHAIN}-ar" RANLIB="${TOOLCHAIN}-ranlib" \
+        DLDIR="${RUNNER_TEMP}/nut-win-deps" NUT_PREREQS_ONLY="libregex libusb" \
+            sh ./scripts/Windows/build-mingw-prereqs.sh
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4
@@ -246,11 +266,8 @@ jobs:
 
     # The CodeQL tracer sees the compilations of this step (no ccache here);
     # flags as in scripts/Windows/build-mingw-nut.sh; PKG_CONFIG_LIBDIR keeps
-    # pkg-config from finding the Linux libraries of the runner
+    # pkg-config to the cross-built prerequisites
     - name: NUT CI Build (cross-compile for Windows)
-      env:
-        HOST: ${{ matrix.host }}
-        TOOLCHAIN: ${{ matrix.toolchain }}
       run: |
         TC_PREFIX="/usr/${TOOLCHAIN}"
         WINFLAGS="-D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_POSIX_THREAD_SAFE_FUNCTIONS=200112L -I${TC_PREFIX}/include/ -D_WIN32_WINNT=0xffff"
