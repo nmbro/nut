@@ -3296,9 +3296,22 @@ dnl NOTE: Do not confuse libglib{2} (GNOME) with glibc (part of compiler)
 dnl ----------------------------------------------------------------------
 
 AC_MSG_CHECKING([whether to build nut-upower driver and nut-scanner support])
+nut_upower_skipped_platform=""
 AS_IF([test "${nut_have_libglib}${nut_have_libgio}" = "yesyes"], [
 	AS_CASE(["${nut_with_upower}"],
-		[yes|auto], [nut_with_upower=yes]
+		[yes], [nut_with_upower=yes],
+		[auto], [
+			dnl UPower is a D-Bus system service (upowerd) of Linux and BSD
+			dnl desktops; native Windows has neither, even if GLib/GIO are
+			dnl available (e.g. in MSYS2), so do not build it there by default
+			AS_CASE(["${target_os}"],
+				[*mingw*], [
+					nut_with_upower=no
+					nut_upower_skipped_platform="${target_os}"
+				],
+				[nut_with_upower=yes]
+			)
+		]
 	)
 ], [
 	AS_CASE(["${nut_with_upower}"],
@@ -3309,6 +3322,8 @@ AS_IF([test "${nut_have_libglib}${nut_have_libgio}" = "yesyes"], [
 ])
 
 AC_MSG_RESULT(${nut_with_upower})
+AS_IF([test -n "${nut_upower_skipped_platform}"],
+	[AC_MSG_NOTICE([Not building UPower support by default for '${nut_upower_skipped_platform}': UPower is a D-Bus service which this platform lacks; use --with-upower=yes to build it anyway])])
 NUT_REPORT_DRIVER([build UPower driver and nut-scanner support],
 			[${nut_with_upower}], [],
 			[WITH_UPOWER], [Define to build UPower driver and nut-scanner support])
@@ -5724,7 +5739,7 @@ return res ? 0 : 1;
      my_CXXFLAGS="$CXXFLAGS"
      my_LDFLAGS="$LDFLAGS"
      my_LIBS="$LIBS"
-     CXXFLAGS="$myCXXFLAGS $pkg_cv_CPPUNIT_CFLAGS $pkg_cv_CPPUNIT_CXXFLAGS"
+     CXXFLAGS="$my_CXXFLAGS $pkg_cv_CPPUNIT_CFLAGS $pkg_cv_CPPUNIT_CXXFLAGS"
      LDFLAGS="$my_LDFLAGS $pkg_cv_CPPUNIT_LDFLAGS"
      LIBS="$my_LIBS $pkg_cv_CPPUNIT_LIBS"
      AC_LANG_PUSH([C++])

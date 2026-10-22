@@ -5,6 +5,43 @@ dnl do the checking only once.
 dnl It can use autoconf cache to speed up re-runs, assuming unmodified system
 dnl environment and same configuration script arguments.
 
+dnl NUT_SEARCH_LIBS_GDIMAGEPNG([libraries], [action-if-found], [action-if-not-found])
+dnl Like AC_SEARCH_LIBS(gdImagePng, ...), which sets the same cache variable,
+dnl but with a test program which includes gd.h: AC_SEARCH_LIBS() declares the
+dnl function itself as "char gdImagePng();", which does not link with libgd
+dnl builds whose methods use the __stdcall calling convention (BGD_STDCALL in
+dnl gd.h), such as 32-bit Windows DLLs exporting "gdImagePng@8".
+AC_DEFUN([NUT_SEARCH_LIBS_GDIMAGEPNG],
+[
+    AC_CACHE_CHECK([for library containing gdImagePng], [ac_cv_search_gdImagePng], [
+        nut_search_gd_LIBS_save="${LIBS}"
+        ac_cv_search_gdImagePng=no
+        for nut_search_gd_lib in '' $1 ; do
+            AS_IF([test -z "${nut_search_gd_lib}"], [
+                nut_search_gd_res="none required"
+            ], [
+                nut_search_gd_res="-l${nut_search_gd_lib}"
+                LIBS="-l${nut_search_gd_lib} ${nut_search_gd_LIBS_save}"
+            ])
+            AC_LINK_IFELSE([AC_LANG_PROGRAM([[
+#include <stdio.h>
+#include <gd.h>
+]], [[gdImagePng((gdImagePtr)0, (FILE *)0);]])],
+                [ac_cv_search_gdImagePng="${nut_search_gd_res}"])
+            LIBS="${nut_search_gd_LIBS_save}"
+            AS_IF([test x"${ac_cv_search_gdImagePng}" != xno], [break])
+        done
+        unset nut_search_gd_LIBS_save
+        unset nut_search_gd_lib
+        unset nut_search_gd_res
+    ])
+    AS_IF([test x"${ac_cv_search_gdImagePng}" != xno], [
+        AS_IF([test x"${ac_cv_search_gdImagePng}" != x"none required"],
+            [LIBS="${ac_cv_search_gdImagePng} ${LIBS}"])
+        $2
+    ], [$3])
+])
+
 AC_DEFUN([NUT_CHECK_LIBGD],
 [
     dnl Have we been here in this run?
@@ -123,7 +160,7 @@ AC_DEFUN([NUT_CHECK_LIBGD],
             LDFLAGS="${LDFLAGS_ORIG} ${depLDFLAGS}"
             LIBS="${LIBS_ORIG} ${depLIBS}"
             AC_CHECK_HEADERS(gd.h gdfontmb.h, [nut_cv_have_libgd=yes], [nut_cv_have_libgd=no], [AC_INCLUDES_DEFAULT])
-            AC_SEARCH_LIBS(gdImagePng, gd, [], [
+            NUT_SEARCH_LIBS_GDIMAGEPNG(gd, [], [
                 dnl If using pkg-config, query additionally for Libs.private
                 dnl to pull -L/usr/X11R6/lib or whatever current OS wants
                 AC_MSG_CHECKING([for more gd library flags])
@@ -134,17 +171,20 @@ AC_DEFUN([NUT_CHECK_LIBGD],
                         depLDFLAGS="$depLDFLAGS $depLIBS_PRIVATE"
                         unset ac_cv_search_gdImagePng
                         LDFLAGS="${LDFLAGS_ORIG} ${depLDFLAGS}"
-                        AC_SEARCH_LIBS(gdImagePng, gd, [nut_cv_have_libgd=yes], [nut_cv_have_libgd=no])
+                        NUT_SEARCH_LIBS_GDIMAGEPNG(gd, [nut_cv_have_libgd=yes], [nut_cv_have_libgd=no])
                     ])
                     unset depLIBS_PRIVATE
-                    dnl At least mingw 32-bit builds of the DLL seem to not
-                    dnl tell the linker how to get from GD to PNG lib
+                    dnl Some builds of the DLL may not tell the linker how
+                    dnl to get from GD to PNG lib (note: 32-bit mingw builds
+                    dnl failed here because of the __stdcall calling
+                    dnl convention of their exports, handled by the search
+                    dnl macro above now)
                     AS_IF([test x"${nut_cv_have_libgd}" = xno], [
                         AC_MSG_CHECKING([with explicit -lpng in the loop])
                         depLDFLAGS="$depLDFLAGS -lgd"
                         unset ac_cv_search_gdImagePng
                         LDFLAGS="${LDFLAGS_ORIG} ${depLDFLAGS}"
-                        AC_SEARCH_LIBS(gdImagePng, png png16, [nut_cv_have_libgd=yes], [nut_cv_have_libgd=no])
+                        NUT_SEARCH_LIBS_GDIMAGEPNG(png png16, [nut_cv_have_libgd=yes], [nut_cv_have_libgd=no])
                     ])
                 ])
             ])
@@ -237,7 +277,7 @@ gdImageDestroy(im);
                 dnl Should restore the cached value and be done with it
                 AC_LANG_PUSH([C])
                 AC_CHECK_HEADERS(gd.h gdfontmb.h, [], [nut_have_libgd=no], [AC_INCLUDES_DEFAULT])
-                AC_SEARCH_LIBS(gdImagePng, gd, [], [
+                NUT_SEARCH_LIBS_GDIMAGEPNG(gd, [], [
                     dnl TOTHINK: Fall back to ...(gdImagePng, png png16, [nut_have_libgd=yes], [nut_have_libgd=no]) ?
                     dnl or our LIBS already know all that is needed?
                     true
