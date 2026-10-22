@@ -138,8 +138,14 @@ https://github.com/networkupstools/nut/milestone/13
       SSL/TLS, and a POSIX regex library (TRE with a wrapper, like the MSYS2
       `libsystre` package) for Linux cross-builds. It warns when MSYS2
       packages a newer version of a dependency than it builds, and
-      `NUT_PREREQS_ONLY` can limit it to some of them. The cross-build notes
-      in `scripts/Windows/README.adoc` were updated accordingly.
+      `NUT_PREREQS_ONLY` can limit it to some of them.
+    * Rewrote `scripts/Windows/README.adoc` for the current practice: which
+      MSYS2 environment to choose (C runtime, packages), the MSYS2 packages
+      and prerequisites built from sources, building, testing and bundling
+      NUT (with the `install-win-bundle` options), Linux cross-builds
+      (including the UCRT toolchain), notes for 32-bit builds, and the CI
+      setups. Instructions for dependencies which NUT for Windows does not
+      use (or which are now packaged or built by the script) were dropped.
     * Moved AppVeyor CI builds to the MSYS2 UCRT64 environment, since the
       MINGW64 one no longer provides `libusb` (1.0) nor `neon` packages.
       They also no longer install MSYS2 packages which they do not use

@@ -1,4 +1,4 @@
-personal_ws-1.1 en 3949 utf-8
+personal_ws-1.1 en 3961 utf-8
 AAC
 AAS
 ABI
@@ -167,6 +167,7 @@ Bxx
 ByPass
 CA's
 CABAC
+CANBUILD
 CAs
 CBI
 CCC
@@ -700,6 +701,7 @@ LLNC
 LLP
 LOADKWH
 LOADPCT
+LOCALAPPDATA
 LOCALSTATE
 LOCKFN
 LOCKNAME
@@ -775,6 +777,7 @@ MSII
 MSIII
 MSVCRT
 MSYS
+MSYSTEM
 MX
 MacKenzie's
 MacOS
@@ -1163,6 +1166,7 @@ QWS
 QinHeng
 Quette
 Quiesced
+RANLIB
 RBAC
 RBWARNTIME
 RDLCK
@@ -1540,6 +1544,7 @@ URI
 USBDEVFS
 USBDevice
 USERADDed
+USERPROFILE
 USV
 UTC
 UTalk
@@ -2102,6 +2107,7 @@ debian
 debootstrap
 debouncing
 debuginfo
+debuglink
 deci
 decrement
 decrypt
@@ -2651,6 +2657,7 @@ libgd
 libgio
 libglib
 libgnurx
+libgomp
 libgpgme
 libgpiod
 libhid
@@ -2684,10 +2691,10 @@ libs
 libserial
 libsnmp
 libssl
+libstdc
 libsystemd
 libsystre
 libtool
-libtre
 libupsclient
 libusb
 libusb's
@@ -2695,6 +2702,7 @@ libusbugen
 libusbx
 libvirt
 libwdi
+libwinpthread
 libwrap
 libxml
 libxslt
@@ -2972,6 +2980,7 @@ nowait
 nowarn
 nowrap
 np
+nsinstall
 nspr
 nss
 ntopAI
@@ -3223,6 +3232,7 @@ qxflags
 rD
 rH
 ragtech
+ranlib
 raritan
 rb
 rbuf
@@ -3465,6 +3475,7 @@ splitaddr
 splitauth
 splitname
 sprintf
+sqlite
 squasher
 sr
 src
@@ -3572,6 +3583,7 @@ systemdsystemunitdir
 systemdsysusersdir
 systemdtmpfilesdir
 systemtest
+systre
 sysusers
 sysutils
 sysvinit

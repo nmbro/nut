@@ -2251,12 +2251,9 @@ involved is very important.
 
 Notable packages *not found* in the repo:
 
-* snmp (net-snmp, ucd-snmp) -- instructions in `scripts/Windows/README.adoc`
-  document now covers building it from source in MSYS2 MinGW x64 environment,
-  essentially same as for Linux cross builds with proper `ARCH` and `PREFIX`
-* libregex (C version, direct NUT `configure` script support was added by
-  the Windows branch); MSYS2 however includes `libpcre` pulled by some
-  of the dependencies above...
+* snmp (net-snmp, ucd-snmp) -- the `scripts/Windows/build-mingw-prereqs.sh`
+  script builds it from sources (as well as other dependencies which the
+  current MSYS2 environment does not package), see `scripts/Windows/README.adoc`
 * augeas
 * avahi
 * powerman
