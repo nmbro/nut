@@ -1,5 +1,5 @@
 # Network UPS Tools: AppVeyor CI recipe step (see appveyor.yml), NUT for Windows
-# with MSYS2 UCRT64 (x64): enforce ccache max_size before the cache save, and
+# with MSYS2 (UCRT64 x64 by default): enforce ccache max_size before the cache save, and
 # report ccache statistics of this build (counters are zeroed in
 # 03-before_build.bat) in the job messages, which the GitHub notification
 # template in appveyor.yml includes for passed builds.
@@ -9,14 +9,15 @@
 # Keep the bash command free of double quotes (Windows PowerShell 5.1 mangles
 # them in native command arguments), and print everything to stdout.
 $env:CHERE_INVOKING = "yes"
-$env:MSYSTEM = "UCRT64"
+# The MSYS2 environment: UCRT64 by default, or e.g. MINGW32 named in NUT_MSYSTEM
+if ($env:NUT_MSYSTEM) { $env:MSYSTEM = $env:NUT_MSYSTEM } else { $env:MSYSTEM = "UCRT64" }
 
 try {
     # AppVeyor saves the build cache right after the on_success scripts, so
     # clean up first (later steps also compiled tests and bundles after the
     # cleanup at the end of 04-build_script.bat); then the reported cache size
     # is what gets saved.
-    $out = & C:\msys64\usr\bin\bash -lc 'date -u ; PATH=/ucrt64/bin:$PATH ; export PATH ; if ! ccache -c ; then echo SKIP: Could not clean up ccache ; fi ; ccache --print-stats'
+    $out = & C:\msys64\usr\bin\bash -lc 'date -u ; PATH=${MINGW_PREFIX}/bin:$PATH ; export PATH ; if ! ccache -c ; then echo SKIP: Could not clean up ccache ; fi ; ccache --print-stats'
     if ($LASTEXITCODE -ne 0) { throw "ccache --print-stats exited with code $LASTEXITCODE" }
     $s = @{}
     $out | ForEach-Object {
@@ -34,7 +35,12 @@ try {
         "ccache: {0} of {1} compilations were cache hits ({2}%); cache size {3:F0} of {4:F0} MiB after cleanup",
         $hits, $total, $pct, ($s['cache_size_kibibyte'] / 1024), ($s['max_cache_size_kibibyte'] / 1024))
     echo $msg
-    Add-AppveyorMessage $msg
+    if (Get-Command Add-AppveyorMessage -ErrorAction SilentlyContinue) {
+        Add-AppveyorMessage $msg
+    } elseif ($env:GITHUB_STEP_SUMMARY) {
+        # GitHub Actions: show it in the job summary instead
+        Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $msg
+    }
 } catch {
     # Cleanup and statistics are best-effort, do not fail the build over them
     echo "SKIP: Could not report ccache statistics: $_"
