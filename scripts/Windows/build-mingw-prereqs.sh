@@ -4,10 +4,28 @@
 # Licensed GPLv2+, same as NUT
 #
 # Helper automating the nuances from NUT::scripts/Windows/README.adoc
-# to provide prerequisites needed in semi-native or cross-builds.
+# to provide prerequisites needed in semi-native or cross-builds of NUT
+# for Windows ("mingw" in the name stands for the MinGW-w64 toolchains
+# used to build for Windows, not for a particular build environment).
 #
-# NOTE: Currently constrained to providing net-snmp under MSYS2
-# (where not packaged/installed) and custom libmodbus from NUT Git.
+# It has two modes, chosen by whether MSYS2_PATH is set:
+# * MSYS2_PATH set (e.g. "export MSYS2_PATH" in the AppVeyor recipe, see
+#   .github/scripts/appveyor/03-before_build.bat): a semi-native build in
+#   the current MSYS2 environment (MSYSTEM, e.g. UCRT64 or MINGW32),
+#   installing into its prefix (MINGW_PREFIX, e.g. /ucrt64 or /mingw32);
+# * otherwise: a cross-build, assuming Debian/Ubuntu with the mingw
+#   cross-compilers installed per README.adoc, for ARCH (default:
+#   x86_64-w64-mingw32) into PREFIX (default: /usr/${ARCH}). Note this
+#   is also what happens when running it in MSYS2 without MSYS2_PATH!
+#
+# NOTE: Each provide_*() method below builds a dependency from sources
+# only where pkg-config does not know it yet (e.g. where MSYS2 does not
+# package it for the current environment, as is common for 32-bit
+# MINGW32), and stashes builds under DLDIR (default: ~/nut-win-deps) for
+# re-use: libusb (1.0), cppunit (only for "make check"), neon, a minimal
+# (PNG only) libgd, net-snmp, and a custom libmodbus from NUT Git (with
+# USB RTU support: a packaged libmodbus is not used, and the stashed build
+# is re-done when that Git source changes).
 #
 # We can not rely on certain common shell facilities like `true`
 # and `false` programs being available (in PATH or at all) so we
