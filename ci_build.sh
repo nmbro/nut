@@ -339,7 +339,8 @@ optional_prepare_ccache() {
             PATH="`echo \"$PATH\" | sed -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,' -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,'`"
         fi
         CCACHE_PATH="$PATH"
-        CCACHE_DIR="${HOME}/.ccache"
+        # Keep the location the caller (e.g. a CI recipe which caches it) set:
+        CCACHE_DIR="${CCACHE_DIR:-${HOME}/.ccache}"
         export CCACHE_PATH CCACHE_DIR PATH
         HAVE_CCACHE=no
         if (command -v ccache || which ccache) \
@@ -3279,7 +3280,8 @@ bindings)
     if [ x"${CI_CCACHE_USE-}" != xno ] && [ -n "${CI_CCACHE_SYMLINKDIR}" ] && [ -d "${CI_CCACHE_SYMLINKDIR}" ] ; then
         PATH="`echo \"$PATH\" | sed -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,' -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,'`"
         CCACHE_PATH="$PATH"
-        CCACHE_DIR="${HOME}/.ccache"
+        # Keep the location the caller (e.g. a CI recipe which caches it) set:
+        CCACHE_DIR="${CCACHE_DIR:-${HOME}/.ccache}"
         if (command -v ccache || which ccache) && ls -la "${CI_CCACHE_SYMLINKDIR}" && mkdir -p "${CCACHE_DIR}"/ ; then
             echo "INFO: Using ccache via PATH preferring tool names in ${CI_CCACHE_SYMLINKDIR}" >&2
             PATH="${CI_CCACHE_SYMLINKDIR}:$PATH"
@@ -3511,7 +3513,8 @@ cross-windows-mingw*)
     ; then
         PATH="`echo \"$PATH\" | sed -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,' -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,'`"
         CCACHE_PATH="$PATH"
-        CCACHE_DIR="${HOME}/.ccache"
+        # Keep the location the caller (e.g. a CI recipe which caches it) set:
+        CCACHE_DIR="${CCACHE_DIR:-${HOME}/.ccache}"
         if (command -v ccache || which ccache) && ls -la "${CI_CCACHE_SYMLINKDIR}" && mkdir -p "${CCACHE_DIR}"/ ; then
             echo "INFO: Using ccache via PATH preferring tool names in ${CI_CCACHE_SYMLINKDIR}" >&2
             PATH="${CI_CCACHE_SYMLINKDIR}:$PATH"
