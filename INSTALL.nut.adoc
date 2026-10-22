@@ -949,6 +949,25 @@ Note that to use NUT for Windows, non-system dependency DLL files must
 be located in same directory as each EXE file that uses them. This can be
 accomplished for FOSS libraries (copying them from the build environment)
 by calling `make install-win-bundle DESTDIR=/some/valid/location` easily.
+For UCRT-based builds, the Universal C Runtime DLL files from a Windows SDK
+can also be delivered this way (for Windows versions older than 10), see
+the `WIN_BUNDLE_UCRT_DIR` notes in `docs/config-prereqs.txt`.
+
+Such a bundle is meant to run NUT, so files which only serve to build other
+programs against NUT (static and import libraries, `*.la` and pkg-config
+files, headers) and NUT libraries which no bundled program uses (e.g. the
+C++ `libnutclient`) are removed from it. To keep them for a developer bundle,
+add `WIN_BUNDLE_DEVEL=yes` to that `make` command (and build NUT with the
+`configure --with-dev` option, to install the headers). The PyNUT module is
+not bundled either; it is published on PyPI as `PyNUTClient` instead, for
+use with any Python installation (`pip install PyNUTClient`).
+
+The debug information is also stripped from the NUT programs and libraries
+in the bundle, which roughly halves its size. To keep it for analysis of
+crashes, add `WIN_BUNDLE_DEBUGINFO_DIR=/some/other/location` to the `make`
+command: the debug information is then saved there as a `.debug` file for
+each stripped program or library (debuggers such as `gdb` find it if it is
+placed next to that file). With `WIN_BUNDLE_STRIP=no` nothing is stripped.
 
 Archives with binaries built by recent iterations of continuous integration
 jobs should be available for exploration on the respective CI platforms.

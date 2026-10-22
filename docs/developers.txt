@@ -304,6 +304,29 @@ of the standard but a GNU extension (and part of C99 and newer standard
 revisions). Many of the "offences" against the older standard actually
 come from system and third-party header files.
 
+When printing such values, please use the format macros rather than
+spelling out the length modifiers, e.g. `"%" PRIuSIZE` and not `"%zu"`,
+since the right modifier differs between platforms and C libraries:
+
+* `size_t` and `ssize_t`: `PRIuSIZE`, `PRIxSIZE`, `PRIiSIZE` (from
+  `nut_stdint.h`);
+* fixed-size and maximum-size integers: `PRIu64`, `PRIuMAX` and friends
+  (from `<inttypes.h>`), possibly casting to `uintmax_t` or `intmax_t`
+  for types which have no format macro of their own;
+* file descriptors and sockets: `PRI_FD` for `TYPE_FD` and `PRI_FD_SOCK`
+  for `TYPE_FD_SOCK` (from `common.h`), so the same format string works
+  for an `int` on POSIX and a `HANDLE` or `SOCKET` on Windows;
+* Windows `DWORD` values, e.g. from `GetLastError()`: `PRIuDWORD` and
+  `PRIxDWORD` (from `wincompat.h`);
+* other pointers: `"%p"` with an explicit `(void *)` cast.
+
+Note that NUT for Windows builds currently use `-Wno-format` (as GCC checks
+the format strings according to MSVCRT rules even when another C library
+is used), so the compiler would not catch mismatches there. Windows is
+an LLP64 platform: `size_t` is 64 bits on WIN64 but 32 bits on WIN32
+(where `long` is also 32 bits), so a hard-coded `%llu` for it would consume
+two arguments and garble (or crash on) the rest of them.
+
 That said, the NUT CI farm does run non-regression builds with GNU C89
 and "strict" C89 standard revisions and minimal passing warnings level,
 to ensure that codebase is and remains at least basically compliant.

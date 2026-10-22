@@ -1,4 +1,4 @@
-personal_ws-1.1 en 3917 utf-8
+personal_ws-1.1 en 3976 utf-8
 AAC
 AAS
 ABI
@@ -42,6 +42,7 @@ ATT
 ATTRS
 ATX
 ATs
+AVIF
 AVL
 AVR
 AVRLCD
@@ -160,12 +161,14 @@ Brogaard
 Brownell
 Bs
 BuildBot
+BuildKit
 BuildRequires
 Buildbot
 Bxx
 ByPass
 CA's
 CABAC
+CANBUILD
 CAs
 CBI
 CCC
@@ -304,6 +307,7 @@ DUMPSTATUS
 DUMPVALUE
 DWAKE
 DWITH
+DWORD
 DX
 Daniele
 Dashjr
@@ -333,6 +337,7 @@ Dly
 Dman
 Dmitry
 DocBook
+Dockerfile
 DocumentRoot
 Doxygen
 DriverInstaller
@@ -487,6 +492,8 @@ Gathman
 Geerling
 Gembe
 Gert
+GetAdaptersAddresses
+GetLastError
 GetRWVars
 GetUPSCommands
 GetUPSList
@@ -514,6 +521,7 @@ HC
 HDD
 HEADs
 HEHn
+HEIF
 HELn
 HFILE
 HIDIOCINITREPORT
@@ -693,8 +701,10 @@ LISTRW
 LISTVARS
 LLDB
 LLNC
+LLP
 LOADKWH
 LOADPCT
+LOCALAPPDATA
 LOCALSTATE
 LOCKFN
 LOCKNAME
@@ -735,6 +745,7 @@ Lukas
 Luxeon
 Lygre
 Lynge
+MAKEFLAGS
 MANPATH
 MAXAGE
 MAXCONN
@@ -770,6 +781,7 @@ MSII
 MSIII
 MSVCRT
 MSYS
+MSYSTEM
 MX
 MacKenzie's
 MacOS
@@ -985,6 +997,7 @@ PHP
 PHVn
 PINGs
 PIPEFN
+PKGS
 PLD
 PLL
 PLVn
@@ -1006,7 +1019,14 @@ PR
 PR'ed
 PREREQ
 PRG
+PRI
+PRIiSIZE
+PRIu
+PRIuDWORD
+PRIuMAX
 PRIuSIZE
+PRIxDWORD
+PRIxSIZE
 PROCNAME
 PROGRA
 PROGS
@@ -1151,6 +1171,7 @@ QWS
 QinHeng
 Quette
 Quiesced
+RANLIB
 RBAC
 RBWARNTIME
 RDLCK
@@ -1195,6 +1216,7 @@ RatedVA
 RealSmart
 RedHat
 Redhat
+Redist
 Regados
 Reinholdtsen
 Remi
@@ -1440,6 +1462,7 @@ TLSv
 TODO
 TORO
 TRACKINGDELAY
+TRE
 TREELINK
 TRYSSL
 TSR
@@ -1526,6 +1549,7 @@ URI
 USBDEVFS
 USBDevice
 USERADDed
+USERPROFILE
 USV
 UTC
 UTalk
@@ -1539,6 +1563,7 @@ Ulfat
 Uncomment
 Unices
 Unitek
+UniversalCRTSdkDir
 Upsonic
 Upstreamed
 Ut
@@ -1590,6 +1615,9 @@ WCH
 WELI
 WH
 WHAD
+WINDMC
+WINDRES
+WINNT
 WINSOCK
 WIP
 WIPO
@@ -1619,6 +1647,7 @@ WinMerge
 WinNUT
 WinPower
 WinUSB
+WindowsSdkDir
 Wireshark
 Wl
 Wno
@@ -1674,6 +1703,7 @@ abcd
 ablerex
 abuild
 accessmode
+accessors
 acl
 acm
 acpi
@@ -1977,6 +2007,7 @@ cmdsrc
 cmdvartab
 cnf
 codebase
+codecs
 codepath
 coldstarts
 collectd
@@ -2083,6 +2114,7 @@ debian
 debootstrap
 debouncing
 debuginfo
+debuglink
 deci
 decrement
 decrypt
@@ -2132,6 +2164,7 @@ dl
 dladm
 dll
 dllldd
+dlltool
 dlopen
 dmake
 dmesg
@@ -2521,6 +2554,8 @@ interprocess
 interruptonly
 interruptsize
 intltool
+intmax
+inttypes
 inverter
 inverters
 invmode
@@ -2629,6 +2664,8 @@ libfuse
 libgd
 libgio
 libglib
+libgnurx
+libgomp
 libgpgme
 libgpiod
 libhid
@@ -2662,7 +2699,9 @@ libs
 libserial
 libsnmp
 libssl
+libstdc
 libsystemd
+libsystre
 libtool
 libupsclient
 libusb
@@ -2671,6 +2710,7 @@ libusbugen
 libusbx
 libvirt
 libwdi
+libwinpthread
 libwrap
 libxml
 libxslt
@@ -2948,8 +2988,10 @@ nowait
 nowarn
 nowrap
 np
+nsinstall
 nspr
 nss
+nssdb
 ntopAI
 ntopSS
 ntopW
@@ -3199,6 +3241,7 @@ qxflags
 rD
 rH
 ragtech
+ranlib
 raritan
 rb
 rbuf
@@ -3219,6 +3262,7 @@ reconnection
 recurses
 recursing
 recv
+redistributable
 redistributors
 reentrancy
 refactored
@@ -3440,6 +3484,8 @@ splitaddr
 splitauth
 splitname
 sprintf
+sql
+sqlite
 squasher
 sr
 src
@@ -3547,6 +3593,7 @@ systemdsystemunitdir
 systemdsysusersdir
 systemdtmpfilesdir
 systemtest
+systre
 sysusers
 sysutils
 sysvinit
@@ -3595,6 +3642,7 @@ tmpfs
 tmpring
 tmux
 toolchain
+toolchains
 toolkits
 toolset
 tooltips
@@ -3607,6 +3655,7 @@ translateY
 treemode
 tripplite
 tripplitesu
+trixie
 troff
 tryconnect
 ts
@@ -3635,6 +3684,7 @@ txg
 txt
 txz
 typedef
+tzname
 uA
 uD
 uM
@@ -3645,6 +3695,7 @@ uc
 ucb
 ucd
 ucrt
+ucrtbase
 udev
 udevadm
 udq
@@ -3653,6 +3704,7 @@ ugen
 ui
 uid
 uint
+uintmax
 ukUNV
 ul
 ulimit
@@ -3830,6 +3882,10 @@ whitespace
 wiki
 wildcard
 wildcards
+wincompat
+windres
+winepath
+wineserver
 winhid
 wininit
 winnutclient
@@ -3890,6 +3946,7 @@ xsl's
 xsltproc
 xstrdup
 xu
+xwin
 xxxAP
 xxxx
 xxxxAP
