@@ -5739,7 +5739,7 @@ return res ? 0 : 1;
      my_CXXFLAGS="$CXXFLAGS"
      my_LDFLAGS="$LDFLAGS"
      my_LIBS="$LIBS"
-     CXXFLAGS="$myCXXFLAGS $pkg_cv_CPPUNIT_CFLAGS $pkg_cv_CPPUNIT_CXXFLAGS"
+     CXXFLAGS="$my_CXXFLAGS $pkg_cv_CPPUNIT_CFLAGS $pkg_cv_CPPUNIT_CXXFLAGS"
      LDFLAGS="$my_LDFLAGS $pkg_cv_CPPUNIT_LDFLAGS"
      LIBS="$my_LIBS $pkg_cv_CPPUNIT_LIBS"
      AC_LANG_PUSH([C++])

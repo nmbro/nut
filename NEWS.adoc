@@ -119,6 +119,12 @@ https://github.com/networkupstools/nut/milestone/13
       (`HANDLE`, `SOCKET` and `DWORD` values printed as `int`, a missing
       argument and a missing `%`), and introduced `PRI_FD`, `PRI_FD_SOCK`,
       `PRIuDWORD` and `PRIxDWORD` format macros for such values.
+    * Fixed `configure` script checks which nest one build test in another
+      (e.g. the Windows `GetAdaptersAddresses()` check, retrying with more
+      libraries) leaking their `-Werror` test options into the build flags,
+      only when not answered from a `config.cache`: so the flags differed
+      between cached and fresh configurations (and `ccache` could not reuse
+      the objects of the other kind).
     * Fixed `configure` script to not use `TMP` as a scratch variable when
       stashing warning flags: it is exported e.g. on MSYS2, so compilers
       used the custom `CFLAGS` as their temporary directory and failed with
