@@ -116,14 +116,17 @@ jobs:
       run: C:\msys64\usr\bin\bash -lc "pacman --noconfirm -Sy"
 
     - name: "02: install MSYS2 packages"
+      id: install
       shell: cmd
       run: call .github\scripts\appveyor\02-install.bat
 
     - name: "03: build prerequisites not packaged for MINGW32"
+      id: prereqs
       shell: cmd
       run: call .github\scripts\appveyor\03-before_build.bat
 
     - name: "04: build NUT"
+      id: build
       shell: cmd
       run: call .github\scripts\appveyor\04-build_script.bat
 
@@ -161,22 +164,26 @@ jobs:
         if-no-files-found: error
         retention-days: 14
 
+    # The caches are saved also when later steps (e.g. tests) failed, as soon
+    # as the steps which fill them succeeded (like APPVEYOR_SAVE_CACHE_ON_ERROR
+    # for master branch builds in appveyor.yml); ccache after any build attempt
+    # (04-build_script.bat enforces its max_size also when the build failed)
     - name: Save cache of MSYS2 packages
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.cache-pacman.outputs.cache-hit != 'true'
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.install.outcome == 'success' && steps.cache-pacman.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: 'C:\msys64\var\cache\pacman\pkg'
         key: ${{ steps.cache-pacman.outputs.cache-primary-key }}
 
     - name: Save cache of prerequisites built from sources
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.cache-deps.outputs.cache-hit != 'true'
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.prereqs.outcome == 'success' && steps.cache-deps.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: 'C:\nut-ci\nut-win-deps'
         key: ${{ steps.cache-deps.outputs.cache-primary-key }}
 
     - name: Save cache of ccache
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
       uses: actions/cache/save@v6
       with:
         path: 'C:\nut-ci\ccache'
