@@ -314,6 +314,7 @@ do_build_mingw_nut() {
 		# look for the compiler-provided DLLs (libgcc_s_*, libstdc++)
 		# and the DLL search path again, now that they are known
 		discover_COMPILER_PATHS
+		discover_TC_PREFIX_DIR
 		SEARCH_DLL_PATH="`cherrypick_MSYS_DLL_PATH`"
 
 		make install DESTDIR="${INSTALL_DIR}" || exit

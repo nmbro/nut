@@ -264,15 +264,17 @@ environment variables:
   the toolchain itself is, so `sudo` is used for that unless `SUDO=" "`);
 * `HOST_FLAG` (default `--host=$ARCH`) and `BUILD_FLAG` (by default
   `--build=` the `dpkg-architecture -qDEB_BUILD_GNU_TYPE` value). These
-  defaults only apply when `PREFIX` is not set: with a custom `PREFIX`, set
+  defaults are not set when both `ARCH` and `PREFIX` are given: then set
   them too, or the dependencies get built with the native compiler;
 * `CC`, `CXX`, `AR`, `RANLIB` and the resource compiler (`RC` for libtool,
   `WINDRES` and `WINDMC` for NUT) if the tool names differ from the
   `ARCH`, e.g. for the UCRT toolchain (with `ARCH=x86_64-w64-mingw32` for
   the `configure` scripts, as older `config.sub` copies do not know the
-  `x86_64-w64-mingw32ucrt` name). As `configure` scripts look for more
-  tools by the host triplet (e.g. `dlltool`), it is simpler to offer the
-  UCRT tools under the `x86_64-w64-mingw32-*` names too, e.g. as symbolic
+  `x86_64-w64-mingw32ucrt` name). With these, the prerequisites (and NUT
+  with `build-mingw-nut.sh`, which sets them itself) build the same with
+  or without the MSVCRT toolchain installed too. Other builds which look
+  for more tools by the host triplet (e.g. `dlltool`) may need the UCRT
+  tools offered under the `x86_64-w64-mingw32-*` names, e.g. as symbolic
   links in `/usr/local/bin` on a system without the MSVCRT toolchain (as
   the CodeQL job does):
 +
@@ -306,27 +308,23 @@ for MSYS2):
 [options="header"]
 |===============================================================================
 | Step              | In cross-builds
-| `libregex`, `libusb`, `libltdl` | Built (32-bit and 64-bit, MSVCRT and
-  UCRT); exercised by the CodeQL CI job.
-| `cppunit`         | Built in a manual test (MSVCRT).
-| `nspr`            | Its build-time tools need a native compiler (`HOST_CC`,
-  `gcc` by default in cross-builds); not tested yet.
-| `nss`             | Its own `make` system gets the cross tool names, a
-  natively built `nsinstall`, and `CROSS_COMPILE=1` (no library signing),
-  and uses the `sqlite3` copy which NSS bundles; not tested yet.
-| `openssl`, `expat`, `libpng` | Built only in cross-builds (MSYS2 packages
-  them), for `neon` (OpenSSL and `expat`), `libgd` (`libpng`) and NUT
-  itself (OpenSSL, as an alternative to NSS); not tested yet.
-| `neon`, `libgd`   | Need the above; not tested yet.
-| `netsnmp`, `libmodbus_git` | Not tested yet (they now get the cross-build
-  flags; `net-snmp` also needs the regex library).
+| `libregex`, `libusb`, `libltdl` | Built; exercised by the CodeQL CI job.
+| `cppunit`, `openssl`, `expat`, `libpng`, `neon`, `libgd`, `netsnmp`,
+  `libmodbus_git` | Built (OpenSSL, `expat` and `libpng` only in
+  cross-builds, MSYS2 packages them).
+| `nspr`            | Built with a native `nsinstall` and the cross binutils
+  named with their paths.
+| `nss`             | Built with the cross tool names, `OS_ARCH=WINNT`, a
+  native `nsinstall`, `CROSS_COMPILE=1` (no library signing), a serial
+  `make`, and the `sqlite3` copy which NSS bundles.
 |===============================================================================
 
-Without the untested ones, cross-built NUT has no SSL, XML, CGI, SNMP or
-Modbus support; with `libltdl` it does have `nut-scanner` (for the protocols
-available). Reports and fixes are welcome. Note that by default (without
-`NUT_PREREQS_ONLY`) the script tries all of them, and fails at the end if
-any is missing. OpenSSL is configured with its own `Configure` script (which
+All of them were built in manual tests for 32-bit and 64-bit MSVCRT and
+64-bit UCRT (Ubuntu 24.04 and Debian 13 containers); cross-built NUT then
+has SSL (OpenSSL by default when both are there, `NUT_SSL_VARIANTS=nss` for
+NSS), XML, SNMP, Modbus, CGI and `nut-scanner`. By default (without
+`NUT_PREREQS_ONLY`) the script tries all of them, prints a summary, and
+fails at the end if any is missing. OpenSSL is configured with its own `Configure` script (which
 needs `perl`): in cross-builds it gets `--cross-compile-prefix=$ARCH-`,
 unless `CC` (and `AR`, `RANLIB`, `RC`) name the tools, e.g. for UCRT.
 
@@ -358,7 +356,12 @@ The NUT CI script calls it too (with parallel `make`):
 
 To check that a cross-built bundle starts, e.g. that it has all the DLLs
 it needs, its programs can be run with Wine (e.g. `wine bin/upsc.exe -V`):
-a missing DLL is reported as "Library ... not found".
+a missing DLL is reported as "Library ... not found". Wine also starts
+programs with DLLs of the wrong C runtime, so for UCRT bundles also check
+that no DLL imports `msvcrt.dll` (`objdump -p FILE | grep 'DLL Name'`).
+Note that with Wine installed, libtool runs `winepath` during MinGW
+cross-builds (harmless; in containers, use `docker run --init` to reap the
+`wineserver` processes).
 
 Notes for 32-bit builds
 -----------------------

@@ -199,6 +199,14 @@ prepareEnv() {
 
 	export CFLAGS CXXFLAGS LDFLAGS PKG_CONFIG_PATH
 
+	# Cross-builds: only look for the target's pkg-config files (not those
+	# of the build host, e.g. from its libexpat1-dev package, which would
+	# make the provide_*() methods below skip a dependency)
+	if [ -n "${HOST_FLAG-}" ] && [ -z "${MSYS2_PATH-}" ] && [ -z "${PKG_CONFIG_LIBDIR-}" ] ; then
+		PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig"
+		export PKG_CONFIG_LIBDIR
+	fi
+
 	[ -n "${WSDIR-}" ] || WSDIR="$DLDIR"/"$ARCH"
 	mkdir -p "$WSDIR" "$DLDIR"
 }
@@ -1068,6 +1076,26 @@ provide_nspr() (
 	fi
 
 	mkdir -p .build && cd .build || exit
+
+	# For "*-mingw*" hosts, NSPR does not build its nsinstall but expects
+	# one in PATH (MSYS2 packages one): build it natively, as for NSS; and
+	# name the cross binutils (the native ones are found otherwise)
+	NSPR_MAKE_ARGS=""
+	if [ -z "${MSYS2_PATH-}" ] && [ -n "${HOST_FLAG-}" ] ; then
+		NSPR_TC="${ARCH}"
+		[ -n "${CC-}" ] && NSPR_TC="`echo \"${CC}\" | sed 's,-gcc$,,'`"
+		$HOST_CC $HOST_CFLAGS -DXP_UNIX -o "`pwd`/nsinstall-native" \
+			../config/nsinstall.c || exit
+		NSPR_MAKE_ARGS="NSINSTALL=`pwd`/nsinstall-native"
+		# (with --target the same as --host, its configure looks them up
+		# with AC_PATH_PROGS, which only takes preset values with a path)
+		AR="`command -v \"${AR:-${NSPR_TC}-ar}\"`" || exit
+		LD="`command -v \"${LD:-${NSPR_TC}-ld}\"`" || exit
+		STRIP="`command -v \"${STRIP:-${NSPR_TC}-strip}\"`" || exit
+		WINDRES="`command -v \"${WINDRES:-${RC:-${NSPR_TC}-windres}}\"`" || exit
+		export AR LD STRIP WINDRES
+	fi
+
 	date -u || true
 	CFLAGS="$CFLAGS -std=gnu17 -Wno-incompatible-pointer-types" \
 	timed ../configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
@@ -1077,14 +1105,14 @@ provide_nspr() (
 		|| { cat config.log ; exit 1; }
 
 	date -u || true
-	timed $MAKE || exit
+	timed $MAKE ${NSPR_MAKE_ARGS} || exit
 
 	# The pre-install location for future runs, laid out like the MSYS2
 	# package (DLLs in bin/)
 	date -u || true
 	INSTDIR="${WSDIR}/${DEP_DIRNAME}/.inst"
 	rm -rf "${INSTDIR}" || echo ""
-	timed $MAKE DESTDIR="${INSTDIR}" install || exit
+	timed $MAKE ${NSPR_MAKE_ARGS} DESTDIR="${INSTDIR}" install || exit
 	mkdir -p "${INSTDIR}${PREFIX}/bin"
 	mv -f "${INSTDIR}${PREFIX}"/lib/*.dll "${INSTDIR}${PREFIX}/bin/"
 	rm -rf "${INSTDIR}${PREFIX}/bin/compile-et.pl" "${INSTDIR}${PREFIX}/bin/prerr.properties" \
@@ -1203,6 +1231,15 @@ provide_nss() (
 	NSS_SQLITE_ARGS=""
 	if pkg-config --exists sqlite3 ; then
 		NSS_SQLITE_ARGS="NSS_USE_SYSTEM_SQLITE=1"
+	else
+		# Link with the bundled copy, in $(DIST)/lib by default
+		unset SQLITE_LIB_DIR
+		# Its Makefile adds an MSVC option for WINNT: not for gcc builds
+		sed -e 's/^OS_CFLAGS += -w44996$/ifndef NS_USE_GCC\
+&\
+endif/' < nss/lib/sqlite/Makefile > nss/lib/sqlite/Makefile.tmp \
+		&& mv -f nss/lib/sqlite/Makefile.tmp nss/lib/sqlite/Makefile \
+		|| exit
 	fi
 
 	# Linux cross-builds: NSS coreconf/WIN32.mk names the tools (gcc, ar,
@@ -1218,7 +1255,13 @@ provide_nss() (
 		${HOST_CC:-gcc} -DLINUX -O2 -o "`pwd`/nsinstall-native" \
 			nss/coreconf/nsinstall/nsinstall.c nss/coreconf/nsinstall/pathsub.c \
 			|| exit
-		NSS_CROSS_ARGS="CROSS_COMPILE=1 NSINSTALL=`pwd`/nsinstall-native"
+		# (and its coreconf/arch.mk takes OS_ARCH from "uname -s", and
+		# CPU_ARCH from "uname -m" only for WINNT: name them for the target)
+		case "${ARCH}" in
+			i?86-*)	NSS_CPU_ARCH="x386" ;;
+			*)	NSS_CPU_ARCH="`echo \"${ARCH}\" | sed 's,-.*$,,'`" ;;
+		esac
+		NSS_CROSS_ARGS="CROSS_COMPILE=1 NSINSTALL=`pwd`/nsinstall-native OS_ARCH=WINNT CPU_ARCH=${NSS_CPU_ARCH}"
 		NSS_CROSS_CC="${CC:-${NSS_TC}-gcc}"
 		NSS_CROSS_CCC="${CXX:-${NSS_TC}-g++}"
 		NSS_CROSS_AR="${AR:-${NSS_TC}-ar}"
@@ -1228,8 +1271,12 @@ provide_nss() (
 
 	date -u || true
 	if [ -n "${NSS_CROSS_ARGS}" ] ; then
+		# Not in parallel: in recursive makes under a jobserver, the
+		# "$(shell $(MAKE) -C dir get_objs)" of NSS coreconf/rules.mk also
+		# gets "Entering directory" lines, so the rule for the DLLs breaks
+		# ("multiple target patterns")
 		# shellcheck disable=SC2016
-		timed $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
+		MAKEFLAGS="-j1" timed $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
 			NS_USE_GCC=1 ${NSS_CONF64} ${NSS_SQLITE_ARGS} ${NSS_CROSS_ARGS} \
 			CC="${NSS_CROSS_CC}" CCC="${NSS_CROSS_CCC}" \
 			AR="${NSS_CROSS_AR} cr \$@" RANLIB="${NSS_CROSS_RANLIB}" \
@@ -1638,6 +1685,8 @@ set | ${EGREP} '^(ARCH|PREFIX|PREFIX_ROOT|PATH|MAKE|MAKEFLAGS|SUDO|DLDIR|WSDIR|C
 # for a quick cross-build. The exit code is non-zero if any provided one is
 # then missing.
 RES=0
+PROVIDED=""
+MISSING=""
 provide_one() {
 	_name="$1" ; _pc="$2" ; _title="$3" ; shift 3
 	if [ -n "${NUT_PREREQS_ONLY-}" ] ; then
@@ -1648,12 +1697,19 @@ provide_one() {
 	fi
 	ci_group "Prerequisite: ${_title}"
 	"provide_${_name}" "$@"
+	_ok=yes
 	case "${_pc}" in
-		*/*)	ls -la "${PREFIX}/${_pc}" || RES=1 ;;
+		*/*)	ls -la "${PREFIX}/${_pc}" || _ok=no ;;
 		*)	ls -la "${PREFIX}/lib/pkgconfig/${_pc}.pc" \
 			&& cat "${PREFIX}/lib/pkgconfig/${_pc}.pc" \
-			|| RES=1 ;;
+			|| _ok=no ;;
 	esac
+	if [ x"${_ok}" = xyes ] ; then
+		PROVIDED="${PROVIDED} ${_name}"
+	else
+		MISSING="${MISSING} ${_name}"
+		RES=1
+	fi
 }
 
 # TODO: params, help, etc...
@@ -1672,4 +1728,13 @@ provide_one libgd gdlib "libgd" "$@"
 provide_one netsnmp netsnmp "net-snmp" "$@"
 provide_one libmodbus_git libmodbus "libmodbus (NUT Git)" "$@"
 ci_endgroup
+
+# Summarize, so a failed step need not be searched for in a long log
+echo "SUMMARY: prerequisites provided:${PROVIDED:- (none)}" >&2
+if [ -n "${MISSING}" ] ; then
+	echo "SUMMARY: FAILED to provide:${MISSING} (see their log groups above)" >&2
+	if [ x"${GITHUB_ACTIONS-}" = xtrue ] ; then
+		echo "::error title=Prerequisites missing::build-mingw-prereqs.sh FAILED to provide:${MISSING}"
+	fi
+fi
 exit $RES
