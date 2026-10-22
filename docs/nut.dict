@@ -1,4 +1,4 @@
-personal_ws-1.1 en 3945 utf-8
+personal_ws-1.1 en 3949 utf-8
 AAC
 AAS
 ABI
@@ -1453,6 +1453,7 @@ TLSv
 TODO
 TORO
 TRACKINGDELAY
+TRE
 TREELINK
 TRYSSL
 TSR
@@ -2649,6 +2650,7 @@ libfuse
 libgd
 libgio
 libglib
+libgnurx
 libgpgme
 libgpiod
 libhid
@@ -2683,7 +2685,9 @@ libserial
 libsnmp
 libssl
 libsystemd
+libsystre
 libtool
+libtre
 libupsclient
 libusb
 libusb's

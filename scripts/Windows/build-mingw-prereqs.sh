@@ -22,7 +22,8 @@
 # only where pkg-config does not know it yet (e.g. where MSYS2 does not
 # package it for the current environment, as is common for 32-bit
 # MINGW32), and stashes builds under DLDIR (default: ~/nut-win-deps) for
-# re-use: libusb (1.0), cppunit (only for "make check"), NSPR and NSS,
+# re-use: a POSIX regex library (TRE with the MSYS2 "systre" wrapper),
+# libusb (1.0), cppunit (only for "make check"), NSPR and NSS,
 # neon, a minimal (PNG only) libgd, net-snmp, and a custom libmodbus from
 # NUT Git (with USB RTU support: a packaged libmodbus is not used, and the
 # stashed build is re-done when that Git source changes). Where MSYS2 does
@@ -229,6 +230,156 @@ fetch_msys2_patch() {
 }
 
 # Provide prerequisites; reentrant (quick skip if installed; quick install if built)
+provide_libregex() (
+	# POSIX regular expressions (regex.h, regcomp() et al), needed by NUT and
+	# net-snmp: where not packaged, e.g. Linux cross-builds (MSYS2 packages
+	# mingw-w64-*-libsystre for all its environments, including MINGW32).
+	# Built like the MSYS2 libtre and libsystre recipes: the TRE library,
+	# and the "systre" wrapper (a regex.h and a few functions calling TRE)
+	# installed also as libregex and libgnurx, with regex.pc and gnurx.pc.
+	# Only the narrow-character API is used, so the MSYS2 TRE patch which
+	# enables wide characters for MinGW (needing autoreconf) is not applied.
+	PKGCFG_NAME="regex"
+	DEP_PRJNAME="tre"
+	DEP_VERSION="0.9.0"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
+	DEP_SHA256="f57f5698cafdfe516d11fb0b71705916fe1162f14b08cf69d7cf86923b5a2477"
+	TRE_RECIPE_COMMIT="34d592ba9f4f1fc1153f09b1398032003c4e45b8"
+	SYSTRE_VERSION="1.0.2"
+	SYSTRE_RECIPE_COMMIT="df797f59a639388c26c489dd76f44ce36c1b6e53"
+
+	warn_if_msys2_newer libtre "${DEP_VERSION}"
+	warn_if_msys2_newer libsystre "${SYSTRE_VERSION}"
+
+	FORCE=false
+	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
+
+	set +e
+	if [ x"$FORCE" = x"false" ] ; then
+		# TODO: Check version
+		if pkg-config --exists "$PKGCFG_NAME" ; then
+			echo "SKIP: pkg-config says '$PKGCFG_NAME' exists" >&2
+			return 0
+		fi
+
+		# Quickly install if prebuilt
+		if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+			(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+			$SUDO cp -pr ./ / && exit
+			exit 1
+		) && {
+			echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+			return 0
+		}
+		fi
+
+		# Not pre-built, fall through
+	fi
+
+	# (Re-)make and install from scratch
+	set -e
+
+	check_archive() {
+		if (command -v sha256sum) >/dev/null 2>/dev/null ; then
+			echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -)
+		else
+			echo "WARNING: sha256sum not found, can not verify ${DEP_ARCHIVE}" >&2
+		fi
+	}
+
+	DEP_URL="https://github.com/laurikari/tre/releases/download/v${DEP_VERSION}/${DEP_ARCHIVE}"
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && check_archive ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "${DEP_URL}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "${DEP_URL}" -O "${DEP_ARCHIVE}" )
+		check_archive || { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	MSYS2_RECIPE_COMMIT="${TRE_RECIPE_COMMIT}"
+	fetch_msys2_patch mingw-w64-libtre 002-pointer-cast.patch 72c87b956eade17ed5444c3c6eae7be09b93d145573f20017ec590d9c2516c52
+	MSYS2_RECIPE_COMMIT="${SYSTRE_RECIPE_COMMIT}"
+	fetch_msys2_patch mingw-w64-libsystre regex.h 5c06d602f089fe1f2a95a59dfe7866e90a3358c714b22f6aafd7c14bd5a0f7c4
+	fetch_msys2_patch mingw-w64-libsystre systre.c 454cdacd0a31d15c1a7b7e9fa8d81d0137a1b628d157cb49071a8cf7f5537827
+	fetch_msys2_patch mingw-w64-libsystre COPYING 3200024286eb0a33c22da3a31c470df07c7b8cfbead2b9528195d67d107264ec
+	SRCDIR_SYSTRE="$DLDIR/${DEP_DIRNAME}-patches"
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf ${DEP_DIRNAME} || echo ""
+
+	tar xzf "$DLDIR/${DEP_ARCHIVE}" || exit
+	cd "./${DEP_DIRNAME}" || exit
+	echo "PATCH: 002-pointer-cast.patch" >&2
+	patch -p1 -i "${SRCDIR_SYSTRE}/002-pointer-cast.patch" || exit
+
+	date -u || true
+	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--enable-shared --enable-static --disable-nls --without-libintl-prefix \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	time $MAKE || exit
+
+	INSTDIR="${WSDIR}/${DEP_DIRNAME}/.inst"
+	rm -rf "${INSTDIR}" || echo ""
+	time $MAKE DESTDIR="${INSTDIR}" install || exit
+
+	# The systre wrapper (MSYS2 builds it with meson, but it is one file):
+	# a static library and a DLL, named and aliased like in the MSYS2 package
+	if [ -n "${HOST_FLAG-}" ] ; then
+		SYSTRE_CC="${CC:-${ARCH}-gcc}"
+		SYSTRE_AR="${AR:-${ARCH}-ar}"
+	else
+		SYSTRE_CC="${CC:-gcc}"
+		SYSTRE_AR="${AR:-ar}"
+	fi
+	mkdir -p .systre && cd .systre || exit
+	cp -f "${SRCDIR_SYSTRE}/regex.h" "${SRCDIR_SYSTRE}/systre.c" ./
+	$SYSTRE_CC -O2 -I. -I"${INSTDIR}${PREFIX}/include" -c systre.c -o systre.o || exit
+	$SYSTRE_AR rcs libsystre.a systre.o || exit
+	$SYSTRE_CC -shared -o libsystre-0.dll systre.o \
+		-L"${INSTDIR}${PREFIX}/lib" -ltre \
+		-Wl,--out-implib,libsystre.dll.a || exit
+
+	mkdir -p "${INSTDIR}${PREFIX}/bin" "${INSTDIR}${PREFIX}/lib/pkgconfig" \
+		"${INSTDIR}${PREFIX}/include" "${INSTDIR}${PREFIX}/share/licenses/libsystre"
+	cp -f libsystre-0.dll "${INSTDIR}${PREFIX}/bin/"
+	cp -f regex.h "${INSTDIR}${PREFIX}/include/"
+	cp -f "${SRCDIR_SYSTRE}/COPYING" "${INSTDIR}${PREFIX}/share/licenses/libsystre/"
+	for L in systre regex gnurx ; do
+		cp -f libsystre.a "${INSTDIR}${PREFIX}/lib/lib${L}.a"
+		cp -f libsystre.dll.a "${INSTDIR}${PREFIX}/lib/lib${L}.dll.a"
+	done
+	for PC in regex gnurx ; do
+		cat > "${INSTDIR}${PREFIX}/lib/pkgconfig/${PC}.pc" << EOF
+prefix=${PREFIX}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: regex
+Description: Regular Expressions library
+Version: ${SYSTRE_VERSION}
+Requires: tre
+Libs: -L\${libdir} -lsystre
+Cflags: -I\${includedir}
+EOF
+	done
+	cd .. || exit
+
+	# Summarize what we have got
+	date -u || true
+	find "${INSTDIR}" -type f -name "*.dll" -o -name "*.dll.a" -o -name "*.pc"
+
+	date -u || true
+	( cd "${INSTDIR}" && $SUDO cp -pr ./ / ) || exit
+	echo "INST: applied '${INSTDIR}'" >&2
+)
+
 provide_libusb() (
 	# Needed where not packaged, e.g. MSYS2 MINGW32 or Linux cross-builds;
 	# MSYS2 UCRT64, CLANG64 and MINGW64 ship mingw-w64-*-libusb packages.
@@ -1144,40 +1295,37 @@ prepareEnv || exit
 echo "Prepared environment for $0:" >&2
 set | ${EGREP} '^(ARCH|PREFIX|PREFIX_ROOT|PATH|MAKE|MAKEFLAGS|SUDO|DLDIR|WSDIR|CFLAGS|CXXFLAGS|LDFLAGS|PKG_CONFIG_PATH|BUILD_FLAG|HOST_FLAG|MINGW_CHOST|MINGW_PREFIX|MSYS2_PATH)=' >&2
 
-# TODO: Loop, params, help, etc...
+# Provide one prerequisite, if selected: $1 = provide_*() method name suffix,
+# $2 = pkg-config module (to report its file), $3 = title (for the CI log
+# group), the rest is passed to the method (e.g. "-f" to force a rebuild).
+# NUT_PREREQS_ONLY may list the method name suffixes to provide (default:
+# all), e.g. NUT_PREREQS_ONLY="libregex libusb" for a quick cross-build.
+RES=0
+provide_one() {
+	_name="$1" ; _pc="$2" ; _title="$3" ; shift 3
+	if [ -n "${NUT_PREREQS_ONLY-}" ] ; then
+		case " ${NUT_PREREQS_ONLY} " in
+			*" ${_name} "*) ;;
+			*) echo "SKIP: provide_${_name} (not in NUT_PREREQS_ONLY)" >&2 ; return 0 ;;
+		esac
+	fi
+	ci_group "Prerequisite: ${_title}"
+	"provide_${_name}" "$@"
+	ls -la "${PREFIX}/lib/pkgconfig/${_pc}.pc"
+	cat "${PREFIX}/lib/pkgconfig/${_pc}.pc"
+	RES=$?
+}
+
+# TODO: params, help, etc...
 # For now, let it pass "-f" to the builder
-ci_group "Prerequisite: libusb-1.0"
-provide_libusb "$@"
-ls -la "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
-cat "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
-ci_group "Prerequisite: cppunit"
-provide_cppunit "$@"
-ls -la "${PREFIX}/lib/pkgconfig/cppunit.pc"
-cat "${PREFIX}/lib/pkgconfig/cppunit.pc"
-ci_group "Prerequisite: nspr"
-provide_nspr "$@"
-ls -la "${PREFIX}/lib/pkgconfig/nspr.pc"
-cat "${PREFIX}/lib/pkgconfig/nspr.pc"
-ci_group "Prerequisite: nss"
-provide_nss "$@"
-ls -la "${PREFIX}/lib/pkgconfig/nss.pc"
-cat "${PREFIX}/lib/pkgconfig/nss.pc"
-ci_group "Prerequisite: neon"
-provide_neon "$@"
-ls -la "${PREFIX}/lib/pkgconfig/neon.pc"
-cat "${PREFIX}/lib/pkgconfig/neon.pc"
-ci_group "Prerequisite: libgd"
-provide_libgd "$@"
-ls -la "${PREFIX}/lib/pkgconfig/gdlib.pc"
-cat "${PREFIX}/lib/pkgconfig/gdlib.pc"
-ci_group "Prerequisite: net-snmp"
-provide_netsnmp "$@"
-ls -la "${PREFIX}/lib/pkgconfig/netsnmp.pc"
-cat "${PREFIX}/lib/pkgconfig/netsnmp.pc"
-ci_group "Prerequisite: libmodbus (NUT Git)"
-provide_libmodbus_git "$@"
-ls -la "${PREFIX}/lib/pkgconfig/libmodbus.pc"
-cat "${PREFIX}/lib/pkgconfig/libmodbus.pc"
-RES=$?
+provide_one libregex regex "regex (TRE, systre)" "$@"
+provide_one libusb libusb-1.0 "libusb-1.0" "$@"
+provide_one cppunit cppunit "cppunit" "$@"
+provide_one nspr nspr "nspr" "$@"
+provide_one nss nss "nss" "$@"
+provide_one neon neon "neon" "$@"
+provide_one libgd gdlib "libgd" "$@"
+provide_one netsnmp netsnmp "net-snmp" "$@"
+provide_one libmodbus_git libmodbus "libmodbus (NUT Git)" "$@"
 ci_endgroup
 exit $RES

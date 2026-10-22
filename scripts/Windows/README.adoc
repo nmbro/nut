@@ -78,12 +78,30 @@ On Debian/Ubuntu and similar systems, use:
 	# apt-get update
 	# apt-get install mingw-w64
 
+These toolchains (`i686-w64-mingw32` and `x86_64-w64-mingw32`) use the old
+MSVCRT C runtime, like the MSYS2 MINGW32 and MINGW64 environments. For the
+Universal C Runtime (UCRT), like MSYS2 UCRT64 builds (which need Windows 10
+or newer, or the UCRT installed), Debian 13 and newer also package an
+`x86_64-w64-mingw32ucrt` toolchain:
+
+	# apt-get install gcc-mingw-w64-ucrt64 g++-mingw-w64-ucrt64
+
 On Redhat and similar systems, use:
 
 	# ???
 
-You will also need pthread and mingw regex libraries, and other recommended
-dependencies as detailed below.
+You will also need a regex library, and other recommended dependencies as
+detailed below.
+
+NOTE: The `build-mingw-prereqs.sh` script in this directory automates the
+builds of a regex library, `libusb` (1.0), `cppunit`, NSPR and NSS, `neon`,
+a minimal `libgd`, `net-snmp` and `libmodbus` (with USB support) from
+sources, verifying the downloads by their checksums, with the environment
+variables described below (`ARCH`, `PREFIX`, `HOST_FLAG`, `BUILD_FLAG`...)
+or for the current MSYS2 environment if `MSYS2_PATH` is set. Optionally,
+`NUT_PREREQS_ONLY` can limit it to some of them, e.g.
+`NUT_PREREQS_ONLY="libregex libusb"`. The manual steps for those below
+may be outdated compared to the script.
 
 [NOTE]
 ======
@@ -270,15 +288,23 @@ Finally, install the resulting files into locations under `PREFIX`:
 MinGW regex library
 ^^^^^^^^^^^^^^^^^^^
 
-You can compile it  using:
+NUT (and `net-snmp`) need the POSIX `regex.h` API, which MinGW does not
+provide. MSYS2 packages it as `libsystre`: a small wrapper around the TRE
+library, also installed as `libregex` and `libgnurx`. The `provide_libregex`
+step of `build-mingw-prereqs.sh` builds the same where it is not packaged
+(e.g. Linux cross-builds), with the patch and wrapper sources of the MSYS2
+`libtre` and `libsystre` recipes. TRE itself can be built manually using:
 
-	:; ( cd "$DLDIR" && wget -c http://netcologne.dl.sourceforge.net/project/mingw/Other/UserContributed/regex/mingw-regex-2.5.1/mingw-libgnurx-2.5.1-src.tar.gz )
+	:; ( cd "$DLDIR" && wget -c https://github.com/laurikari/tre/releases/download/v0.9.0/tre-0.9.0.tar.gz )
 	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/mingw-libgnurx-2.5.1-src.tar.gz
-	:; cd mingw-libgnurx-2.5.1
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
+	:; tar xzf "$DLDIR"/tre-0.9.0.tar.gz
+	:; cd tre-0.9.0
+	:; ./configure --prefix="$PREFIX" $HOST_FLAG --disable-nls
 	:; make
 	:; sudo make install
+
+NOTE: The older `mingw-libgnurx` (2.5.1, from 2010 on SourceForge) used to
+be suggested here instead.
 
 
 libtool (libltdl)
@@ -538,10 +564,11 @@ Set aside a good part of an hour to get this built:
 
 * libgd itself:
 +
-TODO: This works for 64-bit builds, however 32-bit ones are burdened with `@8`
-or `@12` suffixes to symbol names, and subsequent link checks in NUT fail to
-find `libgd` as usable -- so CGI is not built in 32-bit mode. According to
-such context, this must be something about STDCALL and/or "extern C"...
+NOTE: In 32-bit builds, the `libgd` methods use the calling convention of
+the Windows API, so their symbol names have `@8` or `@12` suffixes. Older NUT `configure` scripts failed to link with them (so CGI
+programs were not built in 32-bit mode); now the check includes `gd.h`.
+The `build-mingw-prereqs.sh` script builds a PNG-only `libgd`, which
+avoids most of the dependencies below.
 
 	:; ( cd "$DLDIR" && wget -c https://github.com/libgd/libgd/releases/download/gd-2.3.3/libgd-2.3.3.tar.gz )
 	:; cd "$WSDIR"
@@ -614,7 +641,8 @@ from https://github.com/jimklimov/neon/tree/fix-mingw-cross branch). Due to
 this, instructions below differ from others by setting up an out-of-tree build
 instead of a tarball download. Eventually it would hopefully suffice to fetch
 https://notroj.github.io/neon/neon-0.32.5.tar.gz or newer (PR was merged after
-libneon 0.32.4 release).
+libneon 0.32.4 release). Current releases build fine from the tarball, as the
+`build-mingw-prereqs.sh` script does (with OpenSSL and expat, without NLS).
 
 NOTE: Ability to `make docs` here relies on presence of `xmlto` program.
 In NUT CI workers prepared according to linkdoc:qa-guide[Prerequisites for
@@ -781,7 +809,11 @@ Other requirements
 ipmi, ssl with Mozilla NSS...
 
 * https://ftp.gnu.org/gnu/freeipmi/freeipmi-1.6.9.tar.gz
-* https://ftp.mozilla.org/pub/security/nss/releases/NSS_3_79_RTM/src/nss-3.79-with-nspr-4.34.tar.gz
+* Mozilla NSS and NSPR: the `provide_nspr` and `provide_nss` steps of the
+  `build-mingw-prereqs.sh` script build them like the MSYS2 recipes do (with
+  their patches, and the same versions as MSYS2 packages for its 64-bit
+  environments); NSS has no `make install`, see the script for the files
+  to copy.
 
 
 Cross-building NUT with MinGW in Linux
