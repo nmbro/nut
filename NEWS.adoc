@@ -149,6 +149,10 @@ https://github.com/networkupstools/nut/milestone/13
       which can now be told to use another MSYS2 environment. Its job
       summary reports how long each step took, cache and `ccache` statistics
       and the archive sizes, and long logs are folded into log groups.
+    * The CodeQL analysis (GHA-05) now also covers the Windows-specific
+      code, with cross-builds for 32-bit (MSVCRT, like MSYS2 MINGW32) and
+      64-bit (UCRT, like MSYS2 UCRT64) Windows using the Ubuntu mingw-w64
+      toolchains.
     * The `ci_build.sh` script now exports custom `CFLAGS` et al also for
       MSYS2 builds with `ccache` (that problem was the `TMP` issue above),
       and prefers the `ccache` symlinks of the current MSYS2 environment.

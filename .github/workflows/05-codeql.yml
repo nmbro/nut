@@ -185,3 +185,88 @@ jobs:
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
+
+  # The Windows-specific code (WIN32 code paths, e.g. in common/wincompat.c,
+  # the named pipes in upsd/upsmon/drivers, scripts/Windows/wininit.c) is not
+  # built by the Linux "analyze" job above. Cross-compile NUT for 32-bit and
+  # 64-bit Windows with the Ubuntu mingw-w64 toolchains (GCC, which the CodeQL
+  # Linux build tracer supports; see scripts/Windows/README.adoc for such
+  # builds, and scripts/Windows/build-mingw-nut.sh for the flags), matching
+  # the C runtimes of the NUT for Windows CI builds made semi-natively in
+  # MSYS2: MSVCRT for 32-bit (MINGW32, GHA-09) and UCRT for 64-bit (UCRT64,
+  # AppVeyor). The UCRT toolchain is named x86_64-w64-mingw32ucrt; configure
+  # gets the usual host triplet, which older config.sub copies understand.
+  # Ubuntu packages no MinGW builds of most NUT dependencies, so this builds
+  # what does not need them (e.g. no SSL, USB, SNMP or nut-scanner): their
+  # platform-independent code is analyzed by the job above.
+  analyze-windows-cross:
+    name: Analyze (Windows ${{ matrix.name }}, mingw-w64 cross-build)
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'i686-msvcrt'
+            host: 'i686-w64-mingw32'
+            toolchain: 'i686-w64-mingw32'
+            packages: 'gcc-mingw-w64-i686 g++-mingw-w64-i686 libz-mingw-w64-dev'
+          - name: 'x86_64-ucrt'
+            host: 'x86_64-w64-mingw32'
+            toolchain: 'x86_64-w64-mingw32ucrt'
+            packages: 'gcc-mingw-w64-ucrt64 g++-mingw-w64-ucrt64'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: NUT CI Prerequisite packages (Ubuntu, mingw-w64)
+      env:
+        MINGW_PACKAGES: ${{ matrix.packages }}
+      run: |
+        echo "set man-db/auto-update false" | sudo debconf-communicate
+        sudo dpkg-reconfigure man-db
+        sudo apt-get update
+        # shellcheck disable=SC2086
+        sudo apt-get install -y ${MINGW_PACKAGES} autoconf automake libtool pkgconf python3
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: cpp
+        build-mode: manual
+        queries: +security-extended,security-and-quality
+        config-file: ./.github/codeql/codeql-config.yml
+
+    # The CodeQL tracer sees the compilations of this step (no ccache here);
+    # flags as in scripts/Windows/build-mingw-nut.sh; PKG_CONFIG_LIBDIR keeps
+    # pkg-config from finding the Linux libraries of the runner
+    - name: NUT CI Build (cross-compile for Windows)
+      env:
+        HOST: ${{ matrix.host }}
+        TOOLCHAIN: ${{ matrix.toolchain }}
+      run: |
+        TC_PREFIX="/usr/${TOOLCHAIN}"
+        WINFLAGS="-D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_POSIX_THREAD_SAFE_FUNCTIONS=200112L -I${TC_PREFIX}/include/ -D_WIN32_WINNT=0xffff"
+        "${TOOLCHAIN}-gcc" --version
+        ./autogen.sh
+        ./configure --host="${HOST}" --build="$(dpkg-architecture -qDEB_BUILD_GNU_TYPE)" \
+            --prefix=/ --with-all=auto --without-docs --disable-docs-changelog \
+            --enable-warnings \
+            CC="${TOOLCHAIN}-gcc" CXX="${TOOLCHAIN}-g++" \
+            AR="${TOOLCHAIN}-ar" RANLIB="${TOOLCHAIN}-ranlib" WINDRES="${TOOLCHAIN}-windres" \
+            CFLAGS="${WINFLAGS}" CXXFLAGS="${WINFLAGS}" LDFLAGS="-L${TC_PREFIX}/lib/" \
+            PKG_CONFIG_PATH="${TC_PREFIX}/lib/pkgconfig" PKG_CONFIG_LIBDIR="${TC_PREFIX}/lib/pkgconfig" \
+        || { cat config.log ; exit 1 ; }
+        make -s -j 8
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:cpp/os:windows-${{ matrix.name }}"
