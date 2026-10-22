@@ -59,6 +59,17 @@ jobs:
       MSYS: "winsymlinks:nativestrict"
 
     steps:
+    # Git for Windows on the runners defaults to core.autocrlf=true, which
+    # would check out the "text=auto" files (e.g. data/driver.list.in) with
+    # CRLF line endings, so "make check" format checks of such files fail;
+    # the source tree also contains symlinks
+    - name: Configure git to check out files as in the repository
+      shell: cmd
+      run: |
+        git config --global core.autocrlf false
+        git config --global core.eol lf
+        git config --global core.symlinks true
+
     - name: Checkout repository
       uses: actions/checkout@v7
       with:
