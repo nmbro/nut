@@ -3510,7 +3510,7 @@ bindings)
 # Note that semi-native builds with e.g. MSYS2 on Windows should "just work" as
 # on any other supported platform (more details in docs/config-prereqs.txt).
 cross-windows-mingw*)
-    echo "INFO: When using build-mingw-nut.sh consider 'export INSTALL_WIN_BUNDLE=true' to use mainstream DLL co-bundling recipe" >&2
+    echo "INFO: build-mingw-nut.sh uses the mainstream DLL co-bundling recipe ('make install-win-bundle') unless INSTALL_WIN_BUNDLE=false" >&2
 
     if [ "$HAVE_CCACHE" = yes ] \
     && [ x"${CI_CCACHE_USE-}" != xno ] \
