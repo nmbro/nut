@@ -69,6 +69,12 @@ jobs:
       # inconsistent
       DO_USE_AUTOCONF_CACHE: 'yes'
       CI_CACHE_NUT_BASEDIR: 'C:/nut-ci/autoconf'
+      # NIT (make check) would also use CI_CACHE_NUT_BASEDIR to cache its test
+      # certificates ("auto" when that directory exists), and then point the
+      # PyNUT tests to an OpenSSL CA directory, which the MSYS2 Python fails
+      # to verify the server with; keep the NIT defaults (a CA file), and the
+      # cache for configure results only
+      DO_USE_NIT_TESTCERT_CACHE: 'no'
 
     steps:
     # Git for Windows on the runners defaults to core.autocrlf=true, which
