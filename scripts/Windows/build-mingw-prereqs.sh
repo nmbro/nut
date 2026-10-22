@@ -22,10 +22,12 @@
 # only where pkg-config does not know it yet (e.g. where MSYS2 does not
 # package it for the current environment, as is common for 32-bit
 # MINGW32), and stashes builds under DLDIR (default: ~/nut-win-deps) for
-# re-use: libusb (1.0), cppunit (only for "make check"), neon, a minimal
-# (PNG only) libgd, net-snmp, and a custom libmodbus from NUT Git (with
-# USB RTU support: a packaged libmodbus is not used, and the stashed build
-# is re-done when that Git source changes).
+# re-use: libusb (1.0), cppunit (only for "make check"), NSPR and NSS,
+# neon, a minimal (PNG only) libgd, net-snmp, and a custom libmodbus from
+# NUT Git (with USB RTU support: a packaged libmodbus is not used, and the
+# stashed build is re-done when that Git source changes). Where MSYS2 does
+# package a newer version (for UCRT64) than one built here, a warning says
+# so (see warn_if_msys2_newer()).
 #
 # We can not rely on certain common shell facilities like `true`
 # and `false` programs being available (in PATH or at all) so we
@@ -185,6 +187,47 @@ prepareEnv() {
 	mkdir -p "$WSDIR" "$DLDIR"
 }
 
+# Warn if the MSYS2 package for UCRT64 of a dependency (as a reference for the
+# current release, even where we build for another environment) is newer than
+# what the provide_*() method builds: $1 = package name without the MSYS2
+# environment prefix, $2 = our version. On GitHub Actions also as a warning
+# annotation and in the job summary. Silent where pacman is not available
+# (e.g. Linux cross-builds), or MSYS2 does not package it.
+warn_if_msys2_newer() {
+	if (command -v pacman && command -v vercmp) >/dev/null 2>/dev/null ; then
+		_pkgver="`pacman -Si \"mingw-w64-ucrt-x86_64-$1\" 2>/dev/null | sed -n 's/^Version *: *//p' | sed 's/-[0-9]*$//' | head -1`"
+		if [ -n "${_pkgver}" ] && [ "`vercmp \"${_pkgver}\" \"$2\"`" -gt 0 ] ; then
+			_msg="$1 ${_pkgver} is packaged by MSYS2 (UCRT64), but `basename \"$0\"` builds $1 $2: consider updating provide_$1()"
+			echo "WARNING: ${_msg}" >&2
+			if [ x"${GITHUB_ACTIONS-}" = xtrue ] ; then
+				echo "::warning title=Prerequisite update available::${_msg}"
+				if [ -n "${GITHUB_STEP_SUMMARY-}" ] ; then
+					echo "* :warning: Prerequisite update available: ${_msg}" >> "${GITHUB_STEP_SUMMARY}" || echo ""
+				fi
+			fi
+		fi
+	fi
+	return 0
+}
+
+# Fetch and verify a patch of an MSYS2 MINGW-packages recipe (at the commit in
+# MSYS2_RECIPE_COMMIT): $1 = recipe directory, $2 = file name, $3 = SHA-256
+# checksum (as in the PKGBUILD); into $DLDIR/$DEP_DIRNAME-patches/
+MSYS2_RECIPES_URL="https://raw.githubusercontent.com/msys2/MINGW-packages"
+fetch_msys2_patch() {
+	_pdir="$DLDIR/${DEP_DIRNAME}-patches"
+	mkdir -p "${_pdir}"
+	if [ -s "${_pdir}/$2" ] && echo "$3  $2" | (cd "${_pdir}" && sha256sum -c - >/dev/null) ; then
+		return 0
+	fi
+	echo "FETCH: $2 (MSYS2 recipe ${MSYS2_RECIPE_COMMIT})..." >&2
+	rm -f "${_pdir}/$2"
+	( cd "${_pdir}" && curl -fL "${MSYS2_RECIPES_URL}/${MSYS2_RECIPE_COMMIT}/$1/$2" > "$2" ) || \
+	( cd "${_pdir}" && wget -c "${MSYS2_RECIPES_URL}/${MSYS2_RECIPE_COMMIT}/$1/$2" -O "$2" )
+	echo "$3  $2" | (cd "${_pdir}" && sha256sum -c -) \
+	|| { echo "FAILED: checksum mismatch for ${_pdir}/$2" >&2 ; exit 1 ; }
+}
+
 # Provide prerequisites; reentrant (quick skip if installed; quick install if built)
 provide_libusb() (
 	# Needed where not packaged, e.g. MSYS2 MINGW32 or Linux cross-builds;
@@ -196,6 +239,8 @@ provide_libusb() (
 	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
 	DEP_ARCHIVE="${DEP_DIRNAME}.tar.bz2"
 	DEP_SHA256="fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
 
 	FORCE=false
 	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
@@ -295,6 +340,8 @@ provide_cppunit() (
 	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
 	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
 	DEP_SHA256="89c5c6665337f56fd2db36bc3805a5619709d51fb136e51937072f63fcc717a7"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
 
 	FORCE=false
 	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
@@ -397,6 +444,8 @@ provide_neon() (
 	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
 	DEP_SHA256="a99b7262525a454d1065cf76dd17240fd808dfc4ef15636990ff83a5d0d9e740"
 
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
+
 	FORCE=false
 	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
 
@@ -485,6 +534,289 @@ provide_neon() (
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
 
+# NSPR and NSS (the default SSL/TLS library of NUT for Windows CI builds) are
+# built like the MSYS2 MINGW-packages recipes (mingw-w64-nspr, mingw-w64-nss)
+# do for UCRT64 et al, with their patches; MSYS2 stopped packaging them for
+# MINGW32 in 2026, while still packaging the same versions for 64-bit builds.
+# As these are security libraries, keep DEP_VERSION, the archive checksum and
+# the recipe commit (MSYS2_RECIPE_COMMIT, with the patch checksums from its
+# PKGBUILD) in sync with the current MSYS2 recipe; warn_if_msys2_newer() above
+# reports when MSYS2 packages a newer version than we build.
+
+provide_nspr() (
+	# Netscape Portable Runtime, needed by NSS (see the comment above).
+	PKGCFG_NAME="nspr"
+	DEP_PRJNAME="nspr"
+	DEP_VERSION="4.40"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
+	DEP_SHA256="c0c1884c627f3db7a783f7c7314c695226b2043696791d15519e7e0578c19bdc"
+	MSYS2_RECIPE_COMMIT="c2f733acfc1b9ca50cae4d5d5b4a70f89bc23543"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
+
+	FORCE=false
+	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
+
+	set +e
+	if [ x"$FORCE" = x"false" ] ; then
+		# TODO: Check version
+		if pkg-config --exists "$PKGCFG_NAME" ; then
+			echo "SKIP: pkg-config says '$PKGCFG_NAME' exists" >&2
+			return 0
+		fi
+
+		# Quickly install if prebuilt
+		if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+			(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+			$SUDO cp -pr ./ / && exit
+			exit 1
+		) && {
+			echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+			return 0
+		}
+		fi
+
+		# Not pre-built, fall through
+	fi
+
+	# (Re-)make and install from scratch
+	set -e
+
+	check_archive() {
+		if (command -v sha256sum) >/dev/null 2>/dev/null ; then
+			echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -)
+		else
+			echo "WARNING: sha256sum not found, can not verify ${DEP_ARCHIVE}" >&2
+		fi
+	}
+
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && check_archive ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "https://ftp.mozilla.org/pub/nspr/releases/v${DEP_VERSION}/src/${DEP_ARCHIVE}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "https://ftp.mozilla.org/pub/nspr/releases/v${DEP_VERSION}/src/${DEP_ARCHIVE}" -O "${DEP_ARCHIVE}" )
+		check_archive || { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	fetch_msys2_patch mingw-w64-nspr 0001-fix-integer-casting.patch 23b01b1d3f0c46b232ac3996b1990587a83fe567d6db46771f79d0e034ecedd4
+	fetch_msys2_patch mingw-w64-nspr 0002-fix-autotools.patch 09db781de5606974bc7dd6b0b173f910b027015bb20fddb78ce452ee15d55364
+	fetch_msys2_patch mingw-w64-nspr 0003-mingw.patch b68ccd918d0a8a4f28cc09c9e63cb5772e22af69f55576340315a933c236da94
+	fetch_msys2_patch mingw-w64-nspr 0004-static-build.patch 61ad5b61084e23ea8e4ba59e481ac681917d61257545c3f70937ae6170fad91f
+	fetch_msys2_patch mingw-w64-nspr 0005-fix-x64.patch 2614000b78bf245c9542d6e174071d078dd3290519409ead1256d4a8350d3316
+	fetch_msys2_patch mingw-w64-nspr 0006-aarch64.patch 31eabbfbd8d80ea24e8dab7a8e7aa31f0cd1754c308465dc04a58bc1b6f7207f
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf ${DEP_DIRNAME} || echo ""
+
+	tar xzf "$DLDIR/${DEP_ARCHIVE}" || exit
+	# The sources are in a "nspr" subdirectory, which the patches apply to
+	cd "./${DEP_DIRNAME}/nspr" || exit
+	for P in "$DLDIR/${DEP_DIRNAME}-patches"/0*.patch ; do
+		echo "PATCH: `basename \"$P\"`" >&2
+		patch -Nbp1 -i "$P" || exit
+	done
+
+	NSPR_CONF64=""
+	case "${ARCH}" in
+		x86_64-*) NSPR_CONF64="--enable-64bit" ;;
+	esac
+
+	mkdir -p .build && cd .build || exit
+	date -u || true
+	CFLAGS="$CFLAGS -std=gnu17 -Wno-incompatible-pointer-types" \
+	time ../configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--target="${ARCH}" \
+		--includedir="${PREFIX}/include/nspr" \
+		--enable-optimize --disable-debug ${NSPR_CONF64} \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	time $MAKE || exit
+
+	# The pre-install location for future runs, laid out like the MSYS2
+	# package (DLLs in bin/)
+	date -u || true
+	INSTDIR="${WSDIR}/${DEP_DIRNAME}/.inst"
+	rm -rf "${INSTDIR}" || echo ""
+	time $MAKE DESTDIR="${INSTDIR}" install || exit
+	mkdir -p "${INSTDIR}${PREFIX}/bin"
+	mv -f "${INSTDIR}${PREFIX}"/lib/*.dll "${INSTDIR}${PREFIX}/bin/"
+	rm -rf "${INSTDIR}${PREFIX}/bin/compile-et.pl" "${INSTDIR}${PREFIX}/bin/prerr.properties" \
+		"${INSTDIR}${PREFIX}/include/nspr/md" || echo ""
+
+	# Summarize what we have got
+	date -u || true
+	find "${INSTDIR}" -type f -name "*.dll" -o -name "*.dll.a" -o -name "*.pc"
+
+	date -u || true
+	( cd "${INSTDIR}" && $SUDO cp -pr ./ / ) || exit
+	echo "INST: applied '${INSTDIR}'" >&2
+)
+
+provide_nss() (
+	# Network Security Services (see the comment above); needs NSPR, and
+	# sqlite3 and zlib (packaged by MSYS2 also for MINGW32), and the MSYS2
+	# "nsinstall" and "zip" tools to build. Also provides the certutil and
+	# pk12util tools used by NIT ("make check-NIT") to prepare certificates.
+	PKGCFG_NAME="nss"
+	DEP_PRJNAME="nss"
+	DEP_VERSION="3.132"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
+	DEP_SHA256="ee9cf4837ba801141a804321c4462ad8f452ff4314275c6d5108a6b05af227ff"
+	MSYS2_RECIPE_COMMIT="7d75007446b5b0ee3a05b9af6c2930fbd80e929e"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
+
+	FORCE=false
+	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
+
+	set +e
+	if [ x"$FORCE" = x"false" ] ; then
+		# TODO: Check version
+		if pkg-config --exists "$PKGCFG_NAME" ; then
+			echo "SKIP: pkg-config says '$PKGCFG_NAME' exists" >&2
+			return 0
+		fi
+
+		# Quickly install if prebuilt
+		if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+			(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+			$SUDO cp -pr ./ / && exit
+			exit 1
+		) && {
+			echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+			return 0
+		}
+		fi
+
+		# Not pre-built, fall through
+	fi
+
+	# (Re-)make and install from scratch
+	set -e
+
+	check_archive() {
+		if (command -v sha256sum) >/dev/null 2>/dev/null ; then
+			echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -)
+		else
+			echo "WARNING: sha256sum not found, can not verify ${DEP_ARCHIVE}" >&2
+		fi
+	}
+
+	DEP_URL="https://ftp.mozilla.org/pub/security/nss/releases/NSS_`echo \"${DEP_VERSION}\" | tr . _`_RTM/src/${DEP_ARCHIVE}"
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && check_archive ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "${DEP_URL}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "${DEP_URL}" -O "${DEP_ARCHIVE}" )
+		check_archive || { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	fetch_msys2_patch mingw-w64-nss nss-build.patch ef34f0c8fff8808d466804a779391ad99bb7f67dbdbdca0d1b526d88b5d0c3b2
+	fetch_msys2_patch mingw-w64-nss nss-3.20.1-headers.patch ed0a0a234b443113bff5fe6bea70dbf7fe7f1206acd1129eeed5cff78e3c0503
+	fetch_msys2_patch mingw-w64-nss nss-3.81-aarch64.patch 45664249c0dab17986c47ca3cdf5165d1f2f64838a2f0b340b97e05427ce47cb
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf ${DEP_DIRNAME} || echo ""
+
+	tar xzf "$DLDIR/${DEP_ARCHIVE}" || exit
+	cd "./${DEP_DIRNAME}" || exit
+	for P in nss-build.patch nss-3.20.1-headers.patch nss-3.81-aarch64.patch ; do
+		echo "PATCH: $P" >&2
+		patch -p1 -i "$DLDIR/${DEP_DIRNAME}-patches/$P" || exit
+	done
+
+	NSS_CONF64=""
+	case "${ARCH}" in
+		x86_64-*) NSS_CONF64="USE_64=1" ;;
+	esac
+
+	BUILD_OPT=1
+	NSS_NO_SSL2_NO_EXPORT=1
+	NSS_USE_SYSTEM_SQLITE=1
+	IMPORT_LIB_SUFFIX=.dll.a
+	NSS_DISABLE_GTESTS=1
+	NSS_ENABLE_ECC=1
+	NSS_DISABLE_DBM=1
+	NSPR_INCLUDE_DIR="`nspr-config --includedir`"
+	NSPR_LIB_DIR="`nspr-config --libdir`"
+	SQLITE_LIB_DIR="${PREFIX}/lib"
+	EXTRA_SHARED_LIBS="-lplc4 -lplds4 -lnspr4 -lz -lcrypt32 -lws2_32"
+	export BUILD_OPT NSS_NO_SSL2_NO_EXPORT NSS_USE_SYSTEM_SQLITE IMPORT_LIB_SUFFIX \
+		NSS_DISABLE_GTESTS NSS_ENABLE_ECC NSS_DISABLE_DBM \
+		NSPR_INCLUDE_DIR NSPR_LIB_DIR SQLITE_LIB_DIR EXTRA_SHARED_LIBS
+
+	date -u || true
+	time $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
+		NS_USE_GCC=1 ${NSS_CONF64} \
+		NSS_USE_SYSTEM_SQLITE=1 USE_SYSTEM_ZLIB=1 ZLIB_LIBS="${PREFIX}/lib/libz.dll.a" \
+		|| exit
+
+	# NSS has no "make install": lay out the pre-install location for future
+	# runs like the MSYS2 package does (without the blank NSS databases and
+	# the "unsupported" tools)
+	date -u || true
+	INSTDIR="${WSDIR}/${DEP_DIRNAME}/.inst"
+	rm -rf "${INSTDIR}" || echo ""
+	mkdir -p "${INSTDIR}${PREFIX}/bin" "${INSTDIR}${PREFIX}/include/nss3" "${INSTDIR}${PREFIX}/lib/pkgconfig"
+
+	NSPR_VERSION="`pkg-config --modversion nspr`"
+	sed nss/pkg/pkg-config/nss.pc.in \
+		-e "s,%libdir%,${PREFIX}/lib,g" \
+		-e "s,%prefix%,${PREFIX},g" \
+		-e "s,%exec_prefix%,${PREFIX}/bin,g" \
+		-e "s,%includedir%,${PREFIX}/include/nss3,g" \
+		-e "s,%NSPR_VERSION%,${NSPR_VERSION},g" \
+		-e "s,%NSS_VERSION%,${DEP_VERSION},g" \
+		> "${INSTDIR}${PREFIX}/lib/pkgconfig/nss.pc"
+	cp -f "${INSTDIR}${PREFIX}/lib/pkgconfig/nss.pc" "${INSTDIR}${PREFIX}/lib/pkgconfig/mozilla-nss.pc"
+
+	VMAJOR="`awk '/#define.*NSS_VMAJOR/ {print $3}' nss/lib/nss/nss.h`"
+	VMINOR="`awk '/#define.*NSS_VMINOR/ {print $3}' nss/lib/nss/nss.h`"
+	VPATCH="`awk '/#define.*NSS_VPATCH/ {print $3}' nss/lib/nss/nss.h`"
+	sed nss/pkg/pkg-config/nss-config.in \
+		-e "s,@libdir@,${PREFIX}/lib,g" \
+		-e "s,@prefix@,${PREFIX}/bin,g" \
+		-e "s,@exec_prefix@,${PREFIX}/bin,g" \
+		-e "s,@includedir@,${PREFIX}/include/nss3,g" \
+		-e "s,@MOD_MAJOR_VERSION@,${VMAJOR},g" \
+		-e "s,@MOD_MINOR_VERSION@,${VMINOR},g" \
+		-e "s,@MOD_PATCH_VERSION@,${VPATCH},g" \
+		> "${INSTDIR}${PREFIX}/bin/nss-config"
+	chmod 755 "${INSTDIR}${PREFIX}/bin/nss-config"
+
+	for F in softokn nss nssutil ssl smime ; do
+		cp -pf dist/*.OBJ/lib/${F}3.dll "${INSTDIR}${PREFIX}/bin/"
+		cp -pf dist/*.OBJ/lib/lib${F}3.dll.a "${INSTDIR}${PREFIX}/lib/"
+	done
+	cp -pf dist/*.OBJ/lib/nssckbi.dll dist/*.OBJ/lib/freebl3.dll "${INSTDIR}${PREFIX}/bin/"
+	for F in libnssb.dll.a libnssckfw.dll.a libfreebl.dll.a libcryptohi.dll.a libcerthi.dll.a libcertdb.dll.a libsoftokn.dll.a libpkixutil.dll.a ; do
+		cp -pf dist/*.OBJ/lib/${F} "${INSTDIR}${PREFIX}/lib/"
+	done
+	for F in certutil cmsutil crlutil modutil pk12util signtool signver ssltap ; do
+		cp -pf dist/*.OBJ/bin/${F}.exe "${INSTDIR}${PREFIX}/bin/"
+	done
+	cp -pf dist/public/nss/*.h "${INSTDIR}${PREFIX}/include/nss3/"
+
+	# Summarize what we have got
+	date -u || true
+	find "${INSTDIR}" -type f -name "*.dll" -o -name "*.dll.a" -o -name "*.pc"
+
+	date -u || true
+	( cd "${INSTDIR}" && $SUDO cp -pr ./ / ) || exit
+	echo "INST: applied '${INSTDIR}'" >&2
+)
+
 provide_libgd() (
 	# A minimal libgd for the upsimage.cgi program, which only needs PNG
 	# output with built-in fonts. Packaged libgd builds (e.g. in MSYS2)
@@ -498,6 +830,8 @@ provide_libgd() (
 	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
 	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
 	DEP_SHA256="dd3f1f0bb016edcc0b2d082e8229c822ad1d02223511997c80461481759b1ed2"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
 
 	FORCE=false
 	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
@@ -820,6 +1154,14 @@ ci_group "Prerequisite: cppunit"
 provide_cppunit "$@"
 ls -la "${PREFIX}/lib/pkgconfig/cppunit.pc"
 cat "${PREFIX}/lib/pkgconfig/cppunit.pc"
+ci_group "Prerequisite: nspr"
+provide_nspr "$@"
+ls -la "${PREFIX}/lib/pkgconfig/nspr.pc"
+cat "${PREFIX}/lib/pkgconfig/nspr.pc"
+ci_group "Prerequisite: nss"
+provide_nss "$@"
+ls -la "${PREFIX}/lib/pkgconfig/nss.pc"
+cat "${PREFIX}/lib/pkgconfig/nss.pc"
 ci_group "Prerequisite: neon"
 provide_neon "$@"
 ls -la "${PREFIX}/lib/pkgconfig/neon.pc"
