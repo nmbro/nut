@@ -92,6 +92,30 @@ try:
 except:
     pass
 
+def conf_value_unquote(value):
+    """ Remove the quotes around a value from a NUT configuration file, and
+    undo its backslash escapes like NUT parseconf does: a backslash takes the
+    next character literally, so "C:\\\\NUT\\\\cert" stands for C:\\NUT\\cert.
+    Single quotes are not NUT syntax, values in them are taken as they are.
+    """
+    if len(value) >= 2 and value.startswith("'") and value.endswith("'"):
+        return value[1:-1]
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+    return re.sub(r'\\(.)', r'\1', value)
+
+def capath_for_openssl(ca_path):
+    """ OpenSSL built for Cygwin (e.g. the MSYS2 MSYS Python) splits a CA
+    directory path at colons, like a POSIX PATH list, so a Windows path like
+    D:\\certs becomes "D" and "\\certs", and the latter is looked for on the
+    drive of the current directory. Spell such paths the POSIX way there;
+    /proc/cygdrive works regardless of the configured cygdrive prefix.
+    """
+    if ca_path and sys.platform.startswith(('cygwin', 'msys')) \
+    and re.match(r'^[A-Za-z]:[\\/]', ca_path):
+        return "/proc/cygdrive/%s/%s" % (ca_path[0].lower(), ca_path[3:].replace('\\', '/'))
+    return ca_path
+
 class TrackingID:
     """ Cookie given when performing async action, used to redeem result at a later date. """
     def __init__(self, tracking_id):
@@ -324,10 +348,7 @@ class AuthConf:
                     m = re.match(r'^(INCLUDE(?:_REQUIRED)?)\s+(.*)$', line, re.I)
                     if m:
                         inc_type = m.group(1).upper()
-                        inc_file = m.group(2).strip()
-                        if (inc_file.startswith('"') and inc_file.endswith('"')) or \
-                           (inc_file.startswith("'") and inc_file.endswith("'")):
-                            inc_file = inc_file[1:-1]
+                        inc_file = conf_value_unquote(m.group(2).strip())
 
                         is_required = (inc_type == "INCLUDE_REQUIRED")
                         AuthConf.printDebug( "readAuthConfFile(): INCLUDE '%s'" % (inc_file) )
@@ -338,13 +359,9 @@ class AuthConf:
                         key, value = line.split('=', 1)
                         key = key.strip()
                         keyUC = key.strip().upper()
-                        value = value.strip()
-
-                        # FIXME: NUT parseconf for possibly escaped values is a bit more complicated than this:
-                        # Remove quotes if present
-                        if (value.startswith('"') and value.endswith('"')) or \
-                           (value.startswith("'") and value.endswith("'")):
-                            value = value[1:-1]
+                        # FIXME: NUT parseconf is a bit more complicated than this
+                        # (e.g. several quoted words, or a hash ending the value)
+                        value = conf_value_unquote(value.strip())
 
                         if current_ac is None:
                             if global_scope:
@@ -737,6 +754,9 @@ certhost    : Optional dict or list of dict/lists: {hostname: [certname, certver
                     if not eff_capath:
                         eff_capath = ca_file
                     eff_cafile = None
+                eff_capath = capath_for_openssl(eff_capath)
+                if self.__debug and eff_capath != ca_path:
+                    print( "[DEBUG]  -> SSL -> using capath = %s" % (eff_capath) )
 
                 self.__ssl_context = ssl.create_default_context(cafile=eff_cafile, capath=eff_capath)
 

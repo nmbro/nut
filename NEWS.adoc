@@ -767,6 +767,12 @@ https://github.com/networkupstools/nut/milestone/13
       authentication arguments. Single quotes in configuration are literal.
       Command descriptions now accept the server's `CMDDESC` response.
       [PR #3634]
+    * The Python `PyNUT` module now undoes backslash escapes in `nutauth.conf`
+      values (unquoted or in double quotes) like the C clients do, so Windows
+      paths written as `"C:\\NUT\\cert"` are read correctly. With OpenSSL
+      built for Cygwin (e.g. the MSYS2 MSYS Python), which splits a `CERTPATH`
+      directory at colons, a drive-letter path is passed to it in POSIX
+      spelling instead.
     * Complete support for actions documented in `docs/net-protocol.txt`
       was implemented in C++, Python and PERL bindings in-tree, and for Java
       in link:https://github.com/networkupstools/jNut[jNut] nearby. Among
