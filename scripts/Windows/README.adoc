@@ -137,9 +137,12 @@ some of the `provide_*()` steps, e.g. `NUT_PREREQS_ONLY="libregex libusb"`.
   libraries of the scanned protocols at run time).
 | `cppunit`         | MINGW32, Linux cross-builds | Only for the C++ client
   library tests (`make check`).
-| NSPR and NSS      | MINGW32 | Same versions and patches as the MSYS2
-  packages for the 64-bit environments.
-| `neon`            | MINGW32, MINGW64 | With OpenSSL and expat, without NLS.
+| NSPR and NSS      | MINGW32, Linux cross-builds | Same versions and patches
+  as the MSYS2 packages for the 64-bit environments.
+| OpenSSL, `expat`  | Linux cross-builds | For `neon` (and OpenSSL for NUT).
+| `neon`            | MINGW32, MINGW64, Linux cross-builds | With OpenSSL and
+  expat, without NLS.
+| `libpng`          | Linux cross-builds | For `libgd`.
 | `libgd`           | all | A minimal (PNG only) build for `upsimage.cgi`.
 | `net-snmp`        | all | For `snmp-ups` and the SNMP scan of `nut-scanner`.
 | `libmodbus`       | all | NUT's fork with USB (RTU over USB) support, rebuilt
@@ -247,7 +250,7 @@ NUT for Windows can also be cross-compiled on Linux, e.g. on Debian or Ubuntu
 ----
 
 Besides the NUT build prerequisites (`autoconf`, `automake`, `libtool`,
-`pkgconf`, `make`, `python3`, `curl`, `patch`, `xz-utils`, `dpkg-dev`... as
+`pkgconf`, `make`, `python3`, `perl`, `curl`, `patch`, `xz-utils`, `dpkg-dev`... as
 detailed in linkdoc:qa-guide[Prerequisites for building NUT on different
 OSes,NUT_Config_Prereqs,docs/config-prereqs.txt]), Debian packages
 `libz-mingw-w64-dev` (zlib, for the MSVCRT toolchains and, on Debian 13,
@@ -308,20 +311,24 @@ for MSYS2):
 | `cppunit`         | Built in a manual test (MSVCRT).
 | `nspr`            | Its build-time tools need a native compiler (`HOST_CC`,
   `gcc` by default in cross-builds); not tested yet.
-| `nss`             | Its own `make` system needs more cross-build settings
-  (e.g. a native `nsinstall`); not supported yet.
-| `neon`            | Needs a MinGW build of OpenSSL and `expat` (not packaged
-  by Debian).
-| `libgd`           | Needs `libpng` (not packaged by Debian).
+| `nss`             | Its own `make` system gets the cross tool names, a
+  natively built `nsinstall`, and `CROSS_COMPILE=1` (no library signing),
+  and uses the `sqlite3` copy which NSS bundles; not tested yet.
+| `openssl`, `expat`, `libpng` | Built only in cross-builds (MSYS2 packages
+  them), for `neon` (OpenSSL and `expat`), `libgd` (`libpng`) and NUT
+  itself (OpenSSL, as an alternative to NSS); not tested yet.
+| `neon`, `libgd`   | Need the above; not tested yet.
 | `netsnmp`, `libmodbus_git` | Not tested yet (they now get the cross-build
   flags; `net-snmp` also needs the regex library).
 |===============================================================================
 
-So cross-built NUT has no SSL, XML, CGI or (yet) SNMP and Modbus support;
-with `libltdl` it does have `nut-scanner` (for the protocols available).
-Reports and fixes are welcome. Note that by default (without
+Without the untested ones, cross-built NUT has no SSL, XML, CGI, SNMP or
+Modbus support; with `libltdl` it does have `nut-scanner` (for the protocols
+available). Reports and fixes are welcome. Note that by default (without
 `NUT_PREREQS_ONLY`) the script tries all of them, and fails at the end if
-any is missing.
+any is missing. OpenSSL is configured with its own `Configure` script (which
+needs `perl`): in cross-builds it gets `--cross-compile-prefix=$ARCH-`,
+unless `CC` (and `AR`, `RANLIB`, `RC`) name the tools, e.g. for UCRT.
 
 To build NUT itself, the `build-mingw-nut.sh` script in this directory sets
 the cross-build flags (for `/usr/$ARCH` prefixes, or `/usr/$TOOLCHAIN` if

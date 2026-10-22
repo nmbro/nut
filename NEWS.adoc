@@ -136,10 +136,12 @@ https://github.com/networkupstools/nut/milestone/13
       NSPR and NSS as well, with the same versions and patches as the MSYS2
       packages for 64-bit environments, so 32-bit builds also use NSS for
       SSL/TLS, and a POSIX regex library (TRE with a wrapper, like the MSYS2
-      `libsystre` package) and `libltdl` (for `nut-scanner`) for Linux
-      cross-builds. It warns when MSYS2 packages a newer version of a
-      dependency than it builds, `NUT_PREREQS_ONLY` can limit it to some of
-      them, and it now fails if any of them is missing in the end. The
+      `libsystre` package), `libltdl` (for `nut-scanner`), OpenSSL, `expat`
+      and `libpng` for Linux cross-builds, where it also tries to build NSS
+      (with the cross-build tool names and a native `nsinstall`). It warns
+      when MSYS2 packages a newer version of a dependency than it builds,
+      `NUT_PREREQS_ONLY` can limit it to some of them, and it now fails if
+      any of them is missing in the end. The
       `net-snmp` and `libmodbus` builds now get the cross-build flags too,
       and the NSPR build a native compiler for its build-time tools.
     * The `scripts/Windows/build-mingw-nut.sh` cross-build script now uses

@@ -23,10 +23,13 @@
 # package it for the current environment, as is common for 32-bit
 # MINGW32), and stashes builds under DLDIR (default: ~/nut-win-deps) for
 # re-use: a POSIX regex library (TRE with the MSYS2 "systre" wrapper),
-# libusb (1.0), cppunit (only for "make check"), NSPR and NSS,
-# neon, a minimal (PNG only) libgd, net-snmp, and a custom libmodbus from
-# NUT Git (with USB RTU support: a packaged libmodbus is not used, and the
-# stashed build is re-done when that Git source changes). Where MSYS2 does
+# libusb (1.0), libltdl, cppunit (only for "make check"), NSPR and NSS,
+# OpenSSL, expat and neon, libpng and a minimal (PNG only) libgd, net-snmp,
+# and a custom libmodbus from NUT Git (with USB RTU support: a packaged
+# libmodbus is not used, and the stashed build is re-done when that Git
+# source changes). Some are only built in Linux cross-builds (MSYS2
+# packages them), and not all of them cross-build yet (see README.adoc
+# about cross-building). Where MSYS2 does
 # package a newer version (for UCRT64) than one built here, a warning says
 # so (see warn_if_msys2_newer()).
 #
@@ -685,6 +688,180 @@ provide_cppunit() (
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
 
+# OpenSSL, expat and libpng: needed by neon (OpenSSL, expat) and libgd
+# (libpng), and OpenSSL also as an alternative to NSS for NUT itself, where
+# not packaged, e.g. Linux cross-builds (MSYS2 packages them for all its
+# environments). Built from their release archives (OpenSSL and expat with
+# the same versions and checksums as the MSYS2 recipes; libpng from its
+# release tarball, without the APNG patch of MSYS2, which libgd does not
+# need), with the default options of their own build systems.
+
+# Common part of the methods below: skip if pkg-config knows $PKGCFG_NAME
+# (unless forced with "-f"), or quickly re-install a stashed build; returns
+# 0 if done, 1 if it should be built
+provide_quick_or_build() {
+	if [ x"${1-}" = x"-f" ] ; then return 1 ; fi
+	if pkg-config --exists "$PKGCFG_NAME" ; then
+		echo "SKIP: pkg-config says '$PKGCFG_NAME' exists" >&2
+		return 0
+	fi
+	if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+		cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+		(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+		$SUDO cp -pr ./ / && exit
+		exit 1
+	) && {
+		echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+		return 0
+	}
+	fi
+	return 1
+}
+
+# Download (or reuse a verified download of) $DEP_URL as $DEP_ARCHIVE
+# into $DLDIR, and unpack it into a fresh "${WSDIR}/${DEP_DIRNAME}"
+provide_fetch_unpack() {
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -) ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "${DEP_URL}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "${DEP_URL}" -O "${DEP_ARCHIVE}" )
+		echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -) \
+		|| { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf "${DEP_DIRNAME}" || echo ""
+	case "${DEP_ARCHIVE}" in
+		*.tar.xz)	xz -dc "$DLDIR/${DEP_ARCHIVE}" | tar xf - || exit ;;
+		*.tar.bz2)	tar xjf "$DLDIR/${DEP_ARCHIVE}" || exit ;;
+		*)		tar xzf "$DLDIR/${DEP_ARCHIVE}" || exit ;;
+	esac
+	cd "./${DEP_DIRNAME}" || exit
+}
+
+# Install the stash made with "make DESTDIR=.inst install*" into the system
+provide_apply_inst() {
+	date -u || true
+	find "${WSDIR}/${DEP_DIRNAME}/.inst" -type f -name "*.dll" -o -name "*.dll.a" -o -name "*.pc"
+	( cd "${WSDIR}/${DEP_DIRNAME}/.inst" && $SUDO cp -pr ./ / ) || exit
+	echo "INST: applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+}
+
+provide_openssl() (
+	PKGCFG_NAME="openssl"
+	DEP_PRJNAME="openssl"
+	DEP_VERSION="3.6.5"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.gz"
+	DEP_SHA256="a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98"
+	DEP_URL="https://github.com/openssl/openssl/releases/download/openssl-${DEP_VERSION}/${DEP_ARCHIVE}"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
+
+	set +e
+	provide_quick_or_build "$@" && return 0
+	set -e
+	provide_fetch_unpack
+
+	case "${ARCH}" in
+		i?86-*)		OSSL_TARGET="mingw" ;;
+		x86_64-*)	OSSL_TARGET="mingw64" ;;
+		aarch64-*)	OSSL_TARGET="mingwarm64" ;;
+		*)		echo "FAILED: unsupported ARCH='${ARCH}' for OpenSSL" >&2 ; exit 1 ;;
+	esac
+
+	# OpenSSL Configure is not autotools: in cross-builds it takes a prefix
+	# for the tool names, or the tools (CC, AR, RANLIB, RC for windres)
+	# named in the environment (e.g. for the UCRT toolchain)
+	OSSL_CROSS=""
+	if [ -n "${HOST_FLAG-}" ] && [ -z "${MSYS2_PATH-}" ] && [ -z "${CC-}" ] ; then
+		OSSL_CROSS="--cross-compile-prefix=${ARCH}-"
+	fi
+
+	date -u || true
+	timed perl ./Configure --prefix="${PREFIX}" --libdir=lib \
+		--openssldir="${PREFIX}/etc/ssl" ${OSSL_CROSS} \
+		"${OSSL_TARGET}" shared no-docs no-tests \
+		|| exit
+
+	date -u || true
+	timed $MAKE || exit
+
+	date -u || true
+	rm -rf "`pwd`/.inst" || echo ""
+	timed $MAKE DESTDIR="`pwd`/.inst" install_sw || exit
+
+	provide_apply_inst
+)
+
+provide_expat() (
+	PKGCFG_NAME="expat"
+	DEP_PRJNAME="expat"
+	DEP_VERSION="2.9.0"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.xz"
+	DEP_SHA256="1e6371862cc31999b368c3b89b49994f0677e1bab5f1b2b85ae3741f5d803051"
+	DEP_URL="https://github.com/libexpat/libexpat/releases/download/R_`echo \"${DEP_VERSION}\" | tr . _`/${DEP_ARCHIVE}"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
+
+	set +e
+	provide_quick_or_build "$@" && return 0
+	set -e
+	provide_fetch_unpack
+
+	date -u || true
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--enable-shared --enable-static \
+		--without-docbook --without-examples --without-tests \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	timed $MAKE || exit
+
+	date -u || true
+	rm -rf "`pwd`/.inst" || echo ""
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
+
+	provide_apply_inst
+)
+
+provide_libpng() (
+	PKGCFG_NAME="libpng"
+	DEP_PRJNAME="libpng"
+	DEP_VERSION="1.6.59"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.xz"
+	DEP_SHA256="d80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389"
+	DEP_URL="https://download.sourceforge.net/libpng/${DEP_ARCHIVE}"
+
+	warn_if_msys2_newer "${DEP_PRJNAME}" "${DEP_VERSION}"
+
+	set +e
+	provide_quick_or_build "$@" && return 0
+	set -e
+	provide_fetch_unpack
+
+	# Needs zlib, e.g. from the Debian libz-mingw-w64-dev package
+	date -u || true
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--enable-shared --enable-static \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	timed $MAKE || exit
+
+	date -u || true
+	rm -rf "`pwd`/.inst" || echo ""
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
+
+	provide_apply_inst
+)
+
 provide_neon() (
 	# HTTP/WebDAV client library for the netxml-ups driver and the XML/HTTP
 	# scan of nut-scanner; needed where not packaged, e.g. MSYS2 MINGW32 or
@@ -1007,24 +1184,64 @@ provide_nss() (
 
 	BUILD_OPT=1
 	NSS_NO_SSL2_NO_EXPORT=1
-	NSS_USE_SYSTEM_SQLITE=1
 	IMPORT_LIB_SUFFIX=.dll.a
 	NSS_DISABLE_GTESTS=1
 	NSS_ENABLE_ECC=1
 	NSS_DISABLE_DBM=1
-	NSPR_INCLUDE_DIR="`nspr-config --includedir`"
-	NSPR_LIB_DIR="`nspr-config --libdir`"
+	# Ask pkg-config (also finds the NSPR in PREFIX of a cross-build,
+	# whose nspr-config is not in PATH)
+	NSPR_INCLUDE_DIR="`pkg-config --variable=includedir nspr`"
+	NSPR_LIB_DIR="`pkg-config --variable=libdir nspr`"
 	SQLITE_LIB_DIR="${PREFIX}/lib"
 	EXTRA_SHARED_LIBS="-lplc4 -lplds4 -lnspr4 -lz -lcrypt32 -lws2_32"
-	export BUILD_OPT NSS_NO_SSL2_NO_EXPORT NSS_USE_SYSTEM_SQLITE IMPORT_LIB_SUFFIX \
+	export BUILD_OPT NSS_NO_SSL2_NO_EXPORT IMPORT_LIB_SUFFIX \
 		NSS_DISABLE_GTESTS NSS_ENABLE_ECC NSS_DISABLE_DBM \
 		NSPR_INCLUDE_DIR NSPR_LIB_DIR SQLITE_LIB_DIR EXTRA_SHARED_LIBS
 
+	# The sqlite3 of the build environment (MSYS2 packages it), or the copy
+	# which NSS bundles (e.g. Debian has no MinGW sqlite3 package)
+	NSS_SQLITE_ARGS=""
+	if pkg-config --exists sqlite3 ; then
+		NSS_SQLITE_ARGS="NSS_USE_SYSTEM_SQLITE=1"
+	fi
+
+	# Linux cross-builds: NSS coreconf/WIN32.mk names the tools (gcc, ar,
+	# windres...) for a native MinGW build, so name the cross ones instead,
+	# and its nsinstall must run on the build host (MSYS2 packages one):
+	# build it natively from the NSS sources. CROSS_COMPILE=1 also skips
+	# signing the libraries with shlibsign (it would run a Windows program).
+	NSS_CROSS_ARGS=""
+	if [ -n "${HOST_FLAG-}" ] && [ -z "${MSYS2_PATH-}" ] ; then
+		NSS_TC="${ARCH}"
+		[ -n "${CC-}" ] && NSS_TC="`echo \"${CC}\" | sed 's,-gcc$,,'`"
+		echo "BUILD: native nsinstall for the NSS cross-build..." >&2
+		${HOST_CC:-gcc} -DLINUX -O2 -o "`pwd`/nsinstall-native" \
+			nss/coreconf/nsinstall/nsinstall.c nss/coreconf/nsinstall/pathsub.c \
+			|| exit
+		NSS_CROSS_ARGS="CROSS_COMPILE=1 NSINSTALL=`pwd`/nsinstall-native"
+		NSS_CROSS_CC="${CC:-${NSS_TC}-gcc}"
+		NSS_CROSS_CCC="${CXX:-${NSS_TC}-g++}"
+		NSS_CROSS_AR="${AR:-${NSS_TC}-ar}"
+		NSS_CROSS_RANLIB="${RANLIB:-${NSS_TC}-ranlib}"
+		NSS_CROSS_RC="${RC:-${NSS_TC}-windres}"
+	fi
+
 	date -u || true
-	timed $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
-		NS_USE_GCC=1 ${NSS_CONF64} \
-		NSS_USE_SYSTEM_SQLITE=1 USE_SYSTEM_ZLIB=1 ZLIB_LIBS="${PREFIX}/lib/libz.dll.a" \
-		|| exit
+	if [ -n "${NSS_CROSS_ARGS}" ] ; then
+		# shellcheck disable=SC2016
+		timed $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
+			NS_USE_GCC=1 ${NSS_CONF64} ${NSS_SQLITE_ARGS} ${NSS_CROSS_ARGS} \
+			CC="${NSS_CROSS_CC}" CCC="${NSS_CROSS_CCC}" \
+			AR="${NSS_CROSS_AR} cr \$@" RANLIB="${NSS_CROSS_RANLIB}" \
+			RC="${NSS_CROSS_RC} -O coff --use-temp-file" \
+			USE_SYSTEM_ZLIB=1 ZLIB_LIBS="${PREFIX}/lib/libz.dll.a" \
+			|| exit
+	else
+		timed $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
+			NS_USE_GCC=1 ${NSS_CONF64} ${NSS_SQLITE_ARGS} \
+			USE_SYSTEM_ZLIB=1 ZLIB_LIBS="${PREFIX}/lib/libz.dll.a" \
+			|| exit
+	fi
 
 	# NSS has no "make install": lay out the pre-install location for future
 	# runs like the MSYS2 package does (without the blank NSS databases and
@@ -1064,6 +1281,10 @@ provide_nss() (
 		cp -pf dist/*.OBJ/lib/lib${F}3.dll.a "${INSTDIR}${PREFIX}/lib/"
 	done
 	cp -pf dist/*.OBJ/lib/nssckbi.dll dist/*.OBJ/lib/freebl3.dll "${INSTDIR}${PREFIX}/bin/"
+	# The sqlite3 DLL which NSS builds when not using a system one
+	for F in dist/*.OBJ/lib/sqlite*.dll ; do
+		[ -s "$F" ] && cp -pf "$F" "${INSTDIR}${PREFIX}/bin/"
+	done
 	for F in libnssb.dll.a libnssckfw.dll.a libfreebl.dll.a libcryptohi.dll.a libcerthi.dll.a libcertdb.dll.a libsoftokn.dll.a libpkixutil.dll.a ; do
 		cp -pf dist/*.OBJ/lib/${F} "${INSTDIR}${PREFIX}/lib/"
 	done
@@ -1443,7 +1664,10 @@ provide_one libltdl include/ltdl.h "libltdl" "$@"
 provide_one cppunit cppunit "cppunit" "$@"
 provide_one nspr nspr "nspr" "$@"
 provide_one nss nss "nss" "$@"
+provide_one openssl openssl "openssl" "$@"
+provide_one expat expat "expat" "$@"
 provide_one neon neon "neon" "$@"
+provide_one libpng libpng "libpng" "$@"
 provide_one libgd gdlib "libgd" "$@"
 provide_one netsnmp netsnmp "net-snmp" "$@"
 provide_one libmodbus_git libmodbus "libmodbus (NUT Git)" "$@"
