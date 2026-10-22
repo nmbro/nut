@@ -149,7 +149,14 @@ https://github.com/networkupstools/nut/milestone/13
       `NUT_PREREQS_ONLY` can limit it to some of them, and it now fails if
       any of them is missing in the end. The
       `net-snmp` and `libmodbus` builds now get the cross-build flags too,
-      and the NSPR build a native compiler for its build-time tools.
+      and the NSPR and NSS builds native build-time tools and the cross
+      tool names, so that all its prerequisites now build on Linux for
+      32-bit and 64-bit MSVCRT and 64-bit UCRT Windows (in manual tests).
+      In cross-builds it only uses the target's `pkg-config` files (not
+      those of native packages of the build host), and it ends with a
+      summary of the provided and missing prerequisites. The bundle recipe
+      now takes the DLLs of a UCRT cross-build from the UCRT toolchain (not
+      the MSVCRT ones of the same host triplet).
     * The `scripts/Windows/build-mingw-nut.sh` cross-build script now uses
       the main `make install-win-bundle` recipe by default (the older own
       logic, with `INSTALL_WIN_BUNDLE=false`, missed the GCC runtime DLLs,

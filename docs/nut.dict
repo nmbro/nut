@@ -1,4 +1,4 @@
-personal_ws-1.1 en 3967 utf-8
+personal_ws-1.1 en 3969 utf-8
 AAC
 AAS
 ABI
@@ -3878,6 +3878,8 @@ wildcard
 wildcards
 wincompat
 windres
+winepath
+wineserver
 winhid
 wininit
 winnutclient
