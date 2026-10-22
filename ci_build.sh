@@ -1287,6 +1287,26 @@ configure_CI_BUILDDIR() {
     fi
 }
 
+# GitHub Actions folds the log lines between these markers into a collapsed
+# section with the given title; groups do not nest, so ci_group() closes an
+# open one first. Elsewhere (e.g. AppVeyor, Jenkins) these print nothing.
+# Note: a group opened in a sub-shell must be closed in that sub-shell.
+CI_GROUP_OPEN=false
+ci_group() {
+    ci_endgroup
+    if [ x"${GITHUB_ACTIONS-}" = xtrue ] ; then
+        echo "::group::$*"
+        CI_GROUP_OPEN=true
+    fi
+}
+
+ci_endgroup() {
+    if [ x"${CI_GROUP_OPEN-}" = xtrue ] ; then
+        echo "::endgroup::"
+        CI_GROUP_OPEN=false
+    fi
+}
+
 configure_nut() {
     configure_CI_BUILDDIR
 
@@ -1308,6 +1328,7 @@ configure_nut() {
 
     CI_CACHE_NUT_RETRIED=false
     while : ; do # Note the CI_SHELL_IS_FLAKY=true support below
+      ci_group "Configure NUT: $CONFIGURE_SCRIPT"
       echo "=== CONFIGURING NUT: $CONFIGURE_SCRIPT ${CONFIG_OPTS_STR}"
       echo "=== CC='$CC' CXX='$CXX' CPP='$CPP'"
       echo "=== PATH='$PATH'"
@@ -1362,8 +1383,9 @@ configure_nut() {
                     ;;
             esac
         fi
-      } && return 0 \
+      } && { ci_endgroup ; return 0 ; } \
       || { RES_CFG=$?
+        ci_endgroup
         echo "$0: configure phase complete ($RES_CFG)" >&2
         if [ -n "${CI_CACHE_NUT_HASHDIR_CFG_OPT}" ] && [ -s "${CI_CACHE_NUT_HASHDIR_CFG}/config.cache" ] ; then
             if ${EGREP} "run 'make distclean' and/or 'rm .*config.cache" config.log ; then
@@ -1409,8 +1431,11 @@ build_to_only_catch_errors_target() {
         build_to_only_catch_errors_target all ; return $?
     fi
 
-    # Sub-shells to avoid crashing with "unhandled" faults in "set -e" mode:
-    ( echo "`date`: Starting the parallel build attempt (quietly to build what we can) for '$@' ..."; \
+    # Sub-shells to avoid crashing with "unhandled" faults in "set -e" mode;
+    # a failed parallel attempt is followed by a sequential one, which shows
+    # the remaining errors outside of the (folded) log group:
+    ( ci_group "Parallel build attempt for '$*'"
+      echo "`date`: Starting the parallel build attempt (quietly to build what we can) for '$*' ..."; \
       if [ -n "$PARMAKE_FLAGS" ]; then
         echo "For parallel builds, '$PARMAKE_FLAGS' options would be used"
       fi
@@ -1428,7 +1453,10 @@ build_to_only_catch_errors_target() {
           $CI_TIME $MAKE $MAKE_FLAGS_VERBOSE -k $PARMAKE_FLAGS "$@" ;;
         default)
           $CI_TIME $MAKE -k $PARMAKE_FLAGS "$@" ;;
-      esac ) && echo "`date`: SUCCESS" ; ) || \
+      esac ) && echo "`date`: SUCCESS"
+      RES_PAR=$?
+      ci_endgroup
+      exit $RES_PAR ; ) || \
     ( RET=$?
       if [ "$CI_FAILFAST" = true ]; then
         echo "===== Aborting after parallel build attempt failure for '$*' because CI_FAILFAST=$CI_FAILFAST" >&2
@@ -3441,7 +3469,14 @@ bindings)
     fi
 
     #$MAKE all || \
-    $MAKE $PARMAKE_FLAGS all-quick || exit
+    ci_group "Build NUT: $MAKE $PARMAKE_FLAGS all-quick"
+    $MAKE $PARMAKE_FLAGS all-quick || {
+        RES_MAKE=$?
+        ci_endgroup
+        echo "FATAL: FAILED ($RES_MAKE) to $MAKE all-quick, see the build log (group) above" >&2
+        exit $RES_MAKE
+    }
+    ci_endgroup
     build_to_only_catch_errors_check
     ### if [ "${CI_SKIP_CHECK}" != true ] ; then $MAKE check || exit ; fi
 

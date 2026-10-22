@@ -36,6 +36,26 @@
 #   SUDO=" " PREFIX_ROOT="${HOME}/nut-deps-inst" PREFIX="" \
 #   ARCH="`uname -s`-`uname -p`" ./scripts/Windows/build-mingw-prereqs.sh
 
+# GitHub Actions folds the log lines between these markers into a collapsed
+# section with the given title; groups do not nest, so ci_group() closes an
+# open one first. Elsewhere (e.g. AppVeyor) these print nothing. Same as in
+# ci_build.sh; only call them from the main shell, not from provide_*().
+CI_GROUP_OPEN=no
+ci_group() {
+	ci_endgroup
+	if [ x"${GITHUB_ACTIONS-}" = xtrue ] ; then
+		echo "::group::$*"
+		CI_GROUP_OPEN=yes
+	fi
+}
+
+ci_endgroup() {
+	if [ x"${CI_GROUP_OPEN-}" = xyes ] ; then
+		echo "::endgroup::"
+		CI_GROUP_OPEN=no
+	fi
+}
+
 prepareEnv() {
 	[ -n "${GREP}" ] || {
 		GREP="`command -v grep`" \
@@ -792,21 +812,30 @@ set | ${EGREP} '^(ARCH|PREFIX|PREFIX_ROOT|PATH|MAKE|MAKEFLAGS|SUDO|DLDIR|WSDIR|C
 
 # TODO: Loop, params, help, etc...
 # For now, let it pass "-f" to the builder
+ci_group "Prerequisite: libusb-1.0"
 provide_libusb "$@"
 ls -la "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
 cat "${PREFIX}/lib/pkgconfig/libusb-1.0.pc"
+ci_group "Prerequisite: cppunit"
 provide_cppunit "$@"
 ls -la "${PREFIX}/lib/pkgconfig/cppunit.pc"
 cat "${PREFIX}/lib/pkgconfig/cppunit.pc"
+ci_group "Prerequisite: neon"
 provide_neon "$@"
 ls -la "${PREFIX}/lib/pkgconfig/neon.pc"
 cat "${PREFIX}/lib/pkgconfig/neon.pc"
+ci_group "Prerequisite: libgd"
 provide_libgd "$@"
 ls -la "${PREFIX}/lib/pkgconfig/gdlib.pc"
 cat "${PREFIX}/lib/pkgconfig/gdlib.pc"
+ci_group "Prerequisite: net-snmp"
 provide_netsnmp "$@"
 ls -la "${PREFIX}/lib/pkgconfig/netsnmp.pc"
 cat "${PREFIX}/lib/pkgconfig/netsnmp.pc"
+ci_group "Prerequisite: libmodbus (NUT Git)"
 provide_libmodbus_git "$@"
 ls -la "${PREFIX}/lib/pkgconfig/libmodbus.pc"
 cat "${PREFIX}/lib/pkgconfig/libmodbus.pc"
+RES=$?
+ci_endgroup
+exit $RES
