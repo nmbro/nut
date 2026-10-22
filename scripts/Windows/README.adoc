@@ -261,7 +261,17 @@ builds them when run without `MSYS2_PATH`. Its environment variables:
   `WINDRES` and `WINDMC` for NUT) if the tool names differ from the
   `ARCH` (e.g. for the UCRT toolchain, with `ARCH=x86_64-w64-mingw32` for
   the `configure` scripts, as older `config.sub` copies do not know the
-  `x86_64-w64-mingw32ucrt` name);
+  `x86_64-w64-mingw32ucrt` name). As `configure` scripts look for more
+  tools by the host triplet (e.g. `dlltool`), it is simpler to offer the
+  UCRT tools under the `x86_64-w64-mingw32-*` names too, e.g. as symbolic
+  links in `/usr/local/bin` on a system without the MSVCRT toolchain (as
+  the CodeQL job does):
++
+----
+:; for T in /usr/bin/x86_64-w64-mingw32ucrt-* ; do \
+     sudo ln -s "$T" "/usr/local/bin/x86_64-w64-mingw32-${T#/usr/bin/x86_64-w64-mingw32ucrt-}" ; \
+   done
+----
 * `DLDIR` and `NUT_PREREQS_ONLY`, as above.
 
 For example, as the CodeQL analysis of the Windows code does (see

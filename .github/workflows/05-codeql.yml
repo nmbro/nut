@@ -241,6 +241,16 @@ jobs:
             ${MINGW_PACKAGES} git ca-certificates curl patch make \
             autoconf automake libtool pkgconf python3 perl dpkg-dev
 
+    # The configure scripts look for the tools named after the host triplet
+    # (e.g. x86_64-w64-mingw32-dlltool, -windres), which the UCRT toolchain
+    # names x86_64-w64-mingw32ucrt-*: offer them under both names
+    - name: Make the toolchain available under the host triplet names
+      if: matrix.host != matrix.toolchain
+      run: |
+        for T in /usr/bin/"${TOOLCHAIN}"-* ; do
+            ln -sv "$T" "/usr/local/bin/${HOST}-${T#/usr/bin/${TOOLCHAIN}-}"
+        done
+
     - name: Checkout repository
       uses: actions/checkout@v7
       with:
