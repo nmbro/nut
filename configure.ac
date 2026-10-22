@@ -6757,22 +6757,12 @@ AS_CASE(["${nut_enable_warnings}"],
         ]
 )
 
-AS_IF([test x"${nut_enable_warnings}" != xno || test x"${nut_enable_Werror}" != xno],
-    [AS_IF([test "x${CLANGCC}" = "xyes" || test "x${GCC}" = "xyes"],
-        [AS_CASE(["${target_os}"],
-            [*mingw*], [
-                AC_MSG_NOTICE(
-[GCC on WIN32 builds warns about '%lld' etc. via PRId64 etc.
-even though modern libraries support long-long printing
-in practice (older ones did not - hence the warning).
-Forcing "-Wno-format" into warnings options.
-])
-                CFLAGS="${CFLAGS} -Wno-format"
-                CXXFLAGS="${CXXFLAGS} -Wno-format"
-            ]
-        )
-    ])
-])
+dnl NOTE: MinGW builds used to force "-Wno-format", as GCC checked the
+dnl printf-like methods of NUT by the rules of the old MSVCRT (e.g. no
+dnl "%lld" via PRId64), while NUT for Windows uses a C99 printf() (of
+dnl the UCRT, or of MinGW-w64 itself). Now include/attribute.h declares
+dnl them with the format archetype of the printf() really used (see
+dnl NUT_ATTR_FORMAT_PRINTF), so format strings are checked there too.
 
 dnl ---------------------------------------------------------------------
 AC_MSG_CHECKING([whether to make warnings fatal])

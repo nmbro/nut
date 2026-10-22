@@ -325,7 +325,17 @@ static int parse_nutconf(BOOL start_flag)
 
 	nutf = fopen(fn, "r");
 	if (nutf == NULL) {
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+		/* Cutting off a long message to fit is acceptable here */
 		snprintf(buf, sizeof(buf), "Error opening %s", fn);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 		print_event(LOG_ERR, buf);
 		return 0;
 	}
@@ -384,10 +394,20 @@ static int parse_nutconf(BOOL start_flag)
 	}
 
 	GetFullPathName(fn, sizeof(fullname), fullname, NULL);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+	/* Cutting off a long message to fit is acceptable here */
 	snprintf(buf, sizeof(buf),
 		"NUT disabled, please adjust the configuration to your needs. "
 		"Then set MODE to a suitable value in %s to enable it.",
 		fullname);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 	print_event(LOG_ERR, buf);
 	return 0;
 }

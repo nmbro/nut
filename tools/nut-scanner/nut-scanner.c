@@ -733,11 +733,21 @@ static void handle_arg_cidr(const char *arg_addr, int *auto_nets_ptr)
 # elif defined WIN32 && defined HAVE_GETADAPTERSINFO
 # endif
 
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+					/* Cutting off a long message to fit is acceptable here */
 					snprintf(msg, sizeof(msg),
 						"Interface: %s\tAddress: %s\tMask: %s (subnet: %i, hosts: %i)\tFlags: %08" PRIxMAX "\tType: %08" PRIxMAX,
 						ifname, addr, mask,
 						masklen_subnet, masklen_hosts,
 						ifflags, iftype);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 				}	/* IPv6 */
 #endif	/* HAVE_GETIFADDRS || HAVE_GETADAPTERSADDRESSES */
 				
@@ -793,11 +803,21 @@ static void handle_arg_cidr(const char *arg_addr, int *auto_nets_ptr)
 #endif
 					masklen_hosts = 32 - masklen_subnet;
 
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+					/* Cutting off a long message to fit is acceptable here */
 					snprintf(msg, sizeof(msg),
 						"Interface: %s\tAddress: %s\tMask: %s (subnet: %i, hosts: %i)\tFlags: %08" PRIxMAX "\tType: %08" PRIxMAX,
 						ifname, addr, mask,
 						masklen_subnet, masklen_hosts,
 						ifflags, iftype);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 				}	/* IPv4 */
 
 #ifdef HAVE_GETIFADDRS

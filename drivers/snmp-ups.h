@@ -61,6 +61,7 @@
 #endif
 
 #include "nut_stdint.h"	/* uint32_t */
+#include "attribute.h"	/* NUT_ATTR_FORMAT_PRINTF */
 
 /* FIXME: still needed?
  * workaround for buggy Net-SNMP config */
@@ -433,7 +434,7 @@ bool_t nut_snmp_set_int(const char *OID, long value);
 bool_t nut_snmp_set_time(const char *OID, long value);
 void nut_snmp_perror(struct snmp_session *sess,  int status,
 	struct snmp_pdu *response, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 4, 5)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 4, 5)));
 
 void su_startup(void);
 void su_cleanup(void);

@@ -48,7 +48,7 @@ static HANDLE pipe_connect(const char *pipefn)
 	result = WaitNamedPipe(pipename,NMPWAIT_USE_DEFAULT_WAIT);
 
 	if( result == FALSE ) {
-		printf("WaitNamedPipe : %d\n",GetLastError());
+		printf("WaitNamedPipe : %lu\n", (unsigned long)GetLastError());
 		exit(EXIT_FAILURE);
 	}
 
@@ -63,7 +63,7 @@ static HANDLE pipe_connect(const char *pipefn)
 			NULL);          /* no template file */
 
 	if (fd == INVALID_HANDLE_VALUE) {
-		printf("CreateFile : %d\n",GetLastError());
+		printf("CreateFile : %lu\n", (unsigned long)GetLastError());
 		exit(EXIT_FAILURE);
 	}
 
@@ -146,7 +146,7 @@ int main(int argc, char **argv)
 
 	pipefd = pipe_connect(argv[1]);
 
-	printf("connected: fd %d\n", pipefd);
+	printf("connected: fd %" PRI_FD "\n", pipefd);
 	fflush(stdout);
 
 	thread[0] = CreateThread(

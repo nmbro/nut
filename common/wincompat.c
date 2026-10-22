@@ -473,7 +473,17 @@ void syslog(int priority, const char *fmt, ...)
 	va_end(ap);
 
 	/* Add progname to the formated message */
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+	/* Cutting off a long message to fit is acceptable here */
 	snprintf(buf2, sizeof(buf2), "%s - %s", EventLogName, buf1);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 
 	/* Create the frame */
 	/* first 4 bytes are priority */

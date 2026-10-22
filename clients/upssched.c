@@ -1655,8 +1655,12 @@ static void start_daemon(TYPE_FD lockfd)
 	 * NUT project. */
 	snprintf(ready_event_str, sizeof(ready_event_str), "%llx",
 		(unsigned long long)(uintptr_t)hReady);
-	snprintf(cmdline, sizeof(cmdline), "\"%s\" %s %s",
-		module, WIN32_DAEMON_MARKER, ready_event_str);
+	/* A cut-off command line would lose the event handle for the child */
+	if ((size_t)snprintf(cmdline, sizeof(cmdline), "\"%s\" %s %s",
+		module, WIN32_DAEMON_MARKER, ready_event_str) >= sizeof(cmdline)
+	) {
+		fatalx(EXIT_FAILURE, "Can't start the daemon: command line too long");
+	}
 
 	/* Whatever upsmon envvars are currently set (UPSNAME, NOTIFYTYPE,
 	 * NOTIFYMSG) must NOT leak into the spawned child: unlike fork(),

@@ -320,9 +320,10 @@ since the right modifier differs between platforms and C libraries:
   `PRIxDWORD` (from `wincompat.h`);
 * other pointers: `"%p"` with an explicit `(void *)` cast.
 
-Note that NUT for Windows builds currently use `-Wno-format` (as GCC checks
-the format strings according to MSVCRT rules even when another C library
-is used), so the compiler would not catch mismatches there. Windows is
+For printf-like methods of your own, declare the format check with
+`__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, N, M)))` (from
+`attribute.h`): MinGW-w64 GCC checks a plain `__printf__` by the rules of
+the old MSVCRT, while NUT for Windows uses a C99 `printf()`. Windows is
 an LLP64 platform: `size_t` is 64 bits on WIN64 but 32 bits on WIN32
 (where `long` is also 32 bits), so a hard-coded `%llu` for it would consume
 two arguments and garble (or crash on) the rest of them.

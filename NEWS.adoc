@@ -119,6 +119,13 @@ https://github.com/networkupstools/nut/milestone/13
       (`HANDLE`, `SOCKET` and `DWORD` values printed as `int`, a missing
       argument and a missing `%`), and introduced `PRI_FD`, `PRI_FD_SOCK`,
       `PRIuDWORD` and `PRIxDWORD` format macros for such values.
+    * NUT for Windows builds no longer use `-Wno-format`: the printf-like
+      methods of NUT now declare the format archetype of the `printf()`
+      which MinGW-w64 really uses (C99, not that of the old MSVCRT), so the
+      compiler checks their format strings there too. Fixed what that found:
+      `pipedebug` printed `DWORD` and `HANDLE` values as `int`, `snmp-ups`
+      used the `%F` date format which `msvcrt.dll` lacks, and `upssched`
+      now refuses a daemon command line which would not fit its buffer.
     * Fixed `configure` script checks which nest one build test in another
       (e.g. the Windows `GetAdaptersAddresses()` check, which retries with
       more libraries): the inner test overwrote the flags saved by the outer
