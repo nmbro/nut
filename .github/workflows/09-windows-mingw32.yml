@@ -10,9 +10,10 @@
 # in "env" below select another MSYS2 environment and its specifics. MSYS2
 # is pre-installed on the GitHub-hosted Windows runners (in C:\msys64), so
 # no third-party action is needed to set it up. Several libraries are not
-# packaged by MSYS2 for MINGW32 (libusb, neon, cppunit...): they are built
+# packaged by MSYS2 for MINGW32 (libusb, NSS, neon, cppunit...): they are built
 # from sources by scripts/Windows/build-mingw-prereqs.sh in the
-# 03-before_build step, as are net-snmp and libmodbus for all builds.
+# 03-before_build step, as are net-snmp and libmodbus for all builds. Like
+# the AppVeyor builds, it uses NSS for SSL/TLS (the default NUT_SSL_VARIANTS).
 #
 # Runs on pull_request (not pull_request_target), so for PRs from forks it
 # has a read-only token and runs the copy of this workflow in the PR, which
@@ -51,8 +52,6 @@ jobs:
     env:
       # Read by the .github/scripts/appveyor/*.bat and *.ps1 step scripts:
       NUT_MSYSTEM: MINGW32
-      # MSYS2 does not package NSS for MINGW32, OpenSSL it does:
-      NUT_SSL_VARIANTS: openssl
       NUT_BUNDLE_ARCH: i686
       NUT_BUNDLE_VERSION: gha-${{ github.run_number }}
       NUT_STATEPATH: 'C:\nut-ci\nut-test'
