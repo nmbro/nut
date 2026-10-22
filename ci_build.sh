@@ -1213,8 +1213,11 @@ autogen_get_CONFIGURE_SCRIPT() {
         AUTOCONF_FILES="`ls -1 \"${SCRIPTDIR}\"/configure.ac \"${SCRIPTDIR}\"/m4/*.m4 | sort`"
         # The OS details without the host name (POSIX "uname -n", part of
         # "uname -a"), so that a cache can be shared by equivalent hosts,
-        # e.g. the ever-renamed GitHub Actions runners (GHA-09):
-        AUTOCONF_HASH="$({ cat ${AUTOCONF_FILES} ; uname -s -r -v -m ; } | somehash_filter)" \
+        # e.g. the ever-renamed GitHub Actions runners; a CI recipe which
+        # tracks the relevant changes otherwise (e.g. GHA-09 by the cache
+        # key, with the installed package versions) may set its own
+        # CI_CACHE_NUT_OS_ID instead (runner images differ in "uname -r -v"):
+        AUTOCONF_HASH="$({ cat ${AUTOCONF_FILES} ; if [ -n "${CI_CACHE_NUT_OS_ID-}" ] ; then echo "${CI_CACHE_NUT_OS_ID}" ; else uname -s -r -v -m ; fi ; } | somehash_filter)" \
         || AUTOCONF_HASH=''
 
         if [ -n "${AUTOCONF_HASH}" ]; then

@@ -69,6 +69,10 @@ jobs:
       # inconsistent
       DO_USE_AUTOCONF_CACHE: 'yes'
       CI_CACHE_NUT_BASEDIR: 'C:/nut-ci/autoconf'
+      # Instead of "uname -s -r -v -m" there, which changes with each runner
+      # image (MSYS2 runtime version and build date): the relevant package
+      # versions are a part of the cache key below
+      CI_CACHE_NUT_OS_ID: 'msys2-mingw32-windows-2025'
       # NIT (make check) would also use CI_CACHE_NUT_BASEDIR to cache its test
       # certificates ("auto" when that directory exists), and then point the
       # PyNUT tests to an OpenSSL CA directory, which the MSYS2 Python fails
@@ -134,16 +138,21 @@ jobs:
 
     # The "configure" results also depend on the installed MSYS2 package
     # versions (compilers, libraries), which change without any change in
-    # our sources: hash their list for the cache key below
+    # our sources: hash their list for the cache key below. Only those of
+    # the MSYS2 environment (toolchain, libraries) and the autotools, not
+    # of the MSYS2 base system, which differs between runner images.
     - name: Hash the installed MSYS2 package versions
       id: pkgs
       shell: powershell
       run: |
-        $list = (& C:\msys64\usr\bin\bash -lc 'pacman -Q') -join "`n"
-        if ($LASTEXITCODE -ne 0) { throw "pacman -Q exited with code $LASTEXITCODE" }
+        $env:MSYSTEM = $env:NUT_MSYSTEM
+        $prefix = (& C:\msys64\usr\bin\bash -lc 'echo $MINGW_PACKAGE_PREFIX').Trim()
+        $all = & C:\msys64\usr\bin\bash -lc 'pacman -Q'
+        if ($LASTEXITCODE -ne 0 -or -not $prefix) { throw "Could not list the packages of MSYSTEM=$env:MSYSTEM" }
+        $list = ($all | Where-Object { $_ -like "$prefix-*" -or $_ -match '^(autoconf\S*|automake\S*|libtool|m4|make) ' }) -join "`n"
         $sha = [System.Security.Cryptography.SHA256]::Create()
         $hash = -join ($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($list)) | ForEach-Object { $_.ToString("x2") })
-        echo "hash of $(($list -split "`n").Count) installed packages: $hash"
+        echo "hash of $(($list -split "`n").Count) of $($all.Count) installed packages ($prefix-* and autotools): $hash"
         Add-Content -Path $env:GITHUB_OUTPUT -Value "hash=$hash" -Encoding ascii
 
     # Only an exact key restores this cache: any change of the sources which

@@ -170,7 +170,9 @@ https://github.com/networkupstools/nut/milestone/13
       It also keeps a `CCACHE_DIR` set by the caller (e.g. a CI recipe which
       caches that location), instead of always using `~/.ccache`. With
       `DO_USE_AUTOCONF_CACHE`, its `config.cache` locations no longer depend
-      on the host name, so equivalent CI runners can share them.
+      on the host name, so equivalent CI runners can share them, and a CI
+      recipe which tracks the relevant changes itself may replace the OS
+      details in that hash with a `CI_CACHE_NUT_OS_ID` of its own.
     * Fixed `configure` script detection of `libgd` (for CGI programs) in
       32-bit Windows builds: its methods use the calling convention of the
       Windows API there, so the generic link test of `AC_SEARCH_LIBS()`,
