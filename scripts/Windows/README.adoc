@@ -133,6 +133,8 @@ some of the `provide_*()` steps, e.g. `NUT_PREREQS_ONLY="libregex libusb"`.
 | regex (TRE and the MSYS2 "systre" wrapper) | Linux cross-builds | Also
   installed as `libregex` and `libgnurx`, like the MSYS2 `libsystre` package.
 | `libusb` (1.0)    | MINGW32, MINGW64, Linux cross-builds |
+| `libltdl`         | Linux cross-builds | For `nut-scanner` (which loads the
+  libraries of the scanned protocols at run time).
 | `cppunit`         | MINGW32, Linux cross-builds | Only for the C++ client
   library tests (`make check`).
 | NSPR and NSS      | MINGW32 | Same versions and patches as the MSYS2
@@ -234,7 +236,7 @@ Cross-building on Linux
 -----------------------
 
 NUT for Windows can also be cross-compiled on Linux, e.g. on Debian or Ubuntu
-(also in WSL2), with the MinGW-w64 toolchains:
+(also in WSL2, or in containers), with the MinGW-w64 toolchains:
 
 ----
 # MSVCRT toolchains (like MSYS2 MINGW32 and MINGW64):
@@ -245,21 +247,25 @@ NUT for Windows can also be cross-compiled on Linux, e.g. on Debian or Ubuntu
 ----
 
 Besides the NUT build prerequisites (`autoconf`, `automake`, `libtool`,
-`pkgconf`, `make`, `python3`... as detailed in linkdoc:qa-guide[Prerequisites
-for building NUT on different OSes,NUT_Config_Prereqs,docs/config-prereqs.txt]),
-Debian packages `libz-mingw-w64-dev` (zlib, for the MSVCRT toolchains), but
-no MinGW builds of the other NUT dependencies; `build-mingw-prereqs.sh`
-builds them when run without `MSYS2_PATH`. Its environment variables:
+`pkgconf`, `make`, `python3`, `curl`, `patch`, `xz-utils`, `dpkg-dev`... as
+detailed in linkdoc:qa-guide[Prerequisites for building NUT on different
+OSes,NUT_Config_Prereqs,docs/config-prereqs.txt]), Debian packages
+`libz-mingw-w64-dev` (zlib, for the MSVCRT toolchains and, on Debian 13,
+also for the UCRT one), but no MinGW builds of the other NUT dependencies;
+`build-mingw-prereqs.sh` builds them when run without `MSYS2_PATH`. Its
+environment variables:
 
 * `ARCH`: the host triplet, e.g. `x86_64-w64-mingw32` (default) or
   `i686-w64-mingw32`;
 * `PREFIX`: where to install the dependencies, default `/usr/$ARCH` (where
   the toolchain itself is, so `sudo` is used for that unless `SUDO=" "`);
 * `HOST_FLAG` (default `--host=$ARCH`) and `BUILD_FLAG` (by default
-  `--build=` the `dpkg-architecture -qDEB_BUILD_GNU_TYPE` value);
+  `--build=` the `dpkg-architecture -qDEB_BUILD_GNU_TYPE` value). These
+  defaults only apply when `PREFIX` is not set: with a custom `PREFIX`, set
+  them too, or the dependencies get built with the native compiler;
 * `CC`, `CXX`, `AR`, `RANLIB` and the resource compiler (`RC` for libtool,
   `WINDRES` and `WINDMC` for NUT) if the tool names differ from the
-  `ARCH` (e.g. for the UCRT toolchain, with `ARCH=x86_64-w64-mingw32` for
+  `ARCH`, e.g. for the UCRT toolchain (with `ARCH=x86_64-w64-mingw32` for
   the `configure` scripts, as older `config.sub` copies do not know the
   `x86_64-w64-mingw32ucrt` name). As `configure` scripts look for more
   tools by the host triplet (e.g. `dlltool`), it is simpler to offer the
@@ -272,7 +278,8 @@ builds them when run without `MSYS2_PATH`. Its environment variables:
      sudo ln -s "$T" "/usr/local/bin/x86_64-w64-mingw32-${T#/usr/bin/x86_64-w64-mingw32ucrt-}" ; \
    done
 ----
-* `DLDIR` and `NUT_PREREQS_ONLY`, as above.
+* `DLDIR` and `NUT_PREREQS_ONLY`, as above;
+* `MAKEFLAGS`, e.g. `MAKEFLAGS=-j16` (default `-j 8`).
 
 For example, as the CodeQL analysis of the Windows code does (see
 `.github/workflows/05-codeql.yml`, which runs this as root in a Debian
@@ -286,37 +293,65 @@ container):
    CC="$TOOLCHAIN-gcc" CXX="$TOOLCHAIN-g++" \
    AR="$TOOLCHAIN-ar" RANLIB="$TOOLCHAIN-ranlib" \
    RC="$TOOLCHAIN-windres" WINDRES="$TOOLCHAIN-windres" \
-   NUT_PREREQS_ONLY="libregex libusb" \
+   NUT_PREREQS_ONLY="libregex libusb libltdl" \
    ./scripts/Windows/build-mingw-prereqs.sh
 ----
 
-NOTE: The regex and `libusb` builds are exercised this way by the CodeQL CI
-job. The other `provide_*()` steps were developed for MSYS2 and are not
-regularly tested in cross-builds: `neon` needs a MinGW build of OpenSSL and
-`expat` (not packaged by Debian), `libgd` needs `libpng`, and the NSS build
-(with its own `make` system) may need more variables for a cross-build.
-Reports and fixes are welcome.
+The state of the `provide_*()` steps in cross-builds (most were developed
+for MSYS2):
+
+[options="header"]
+|===============================================================================
+| Step              | In cross-builds
+| `libregex`, `libusb`, `libltdl` | Built (32-bit and 64-bit, MSVCRT and
+  UCRT); exercised by the CodeQL CI job.
+| `cppunit`         | Built in a manual test (MSVCRT).
+| `nspr`            | Its build-time tools need a native compiler (`HOST_CC`,
+  `gcc` by default in cross-builds); not tested yet.
+| `nss`             | Its own `make` system needs more cross-build settings
+  (e.g. a native `nsinstall`); not supported yet.
+| `neon`            | Needs a MinGW build of OpenSSL and `expat` (not packaged
+  by Debian).
+| `libgd`           | Needs `libpng` (not packaged by Debian).
+| `netsnmp`, `libmodbus_git` | Not tested yet (they now get the cross-build
+  flags; `net-snmp` also needs the regex library).
+|===============================================================================
+
+So cross-built NUT has no SSL, XML, CGI or (yet) SNMP and Modbus support;
+with `libltdl` it does have `nut-scanner` (for the protocols available).
+Reports and fixes are welcome. Note that by default (without
+`NUT_PREREQS_ONLY`) the script tries all of them, and fails at the end if
+any is missing.
 
 To build NUT itself, the `build-mingw-nut.sh` script in this directory sets
-the cross-build flags (for `/usr/$ARCH` prefixes) and runs `configure` and
-`make`, and installs the result with the DLLs it needs into
-`nut_install_${ARCH}` (with a `nut_install` symbolic link to the latest one):
+the cross-build flags (for `/usr/$ARCH` prefixes, or `/usr/$TOOLCHAIN` if
+set, e.g. `TOOLCHAIN=x86_64-w64-mingw32ucrt` for a UCRT build with `all64`),
+runs `configure` and `make`, and installs the result with the DLLs it needs
+(by `make install-win-bundle`, see above; or with its own older logic, if
+`INSTALL_WIN_BUNDLE=false`) into `nut_install_${ARCH}` (with a `nut_install`
+symbolic link to the latest one). Pass e.g. `MAKEFLAGS=-j16` for parallel
+builds.
 
 * out-of-tree from the Git source (default):
 
 	:; (cd scripts/Windows/ && ./build-mingw-nut.sh all64)
 	:; (cd scripts/Windows/ && ./build-mingw-nut.sh all32)
+	:; (cd scripts/Windows/ && TOOLCHAIN=x86_64-w64-mingw32ucrt ./build-mingw-nut.sh all64)
 
 * from a NUT release tarball (`SOURCEMODE=stable`, optionally with
   `VER_OPT`), or from a `make dist` tarball of the current sources
   (`SOURCEMODE=dist`).
 
-The NUT CI script calls it too:
+The NUT CI script calls it too (with parallel `make`):
 
 ----
 :; BUILD_TYPE=cross-windows-mingw-32 ./ci_build.sh
 :; BUILD_TYPE=cross-windows-mingw-64 ./ci_build.sh
 ----
+
+To check that a cross-built bundle starts, e.g. that it has all the DLLs
+it needs, its programs can be run with Wine (e.g. `wine bin/upsc.exe -V`):
+a missing DLL is reported as "Library ... not found".
 
 Notes for 32-bit builds
 -----------------------

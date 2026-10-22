@@ -492,6 +492,98 @@ provide_libusb() (
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
 
+provide_libltdl() (
+	# The libtool "dlopen" wrapper, needed by nut-scanner (which loads the
+	# libraries of the scanned protocols at run time), where not packaged,
+	# e.g. Linux cross-builds (MSYS2 packages mingw-w64-*-libltdl for all
+	# its environments). Built from the stand-alone "libltdl" directory of
+	# the libtool release which the MSYS2 libtool/libltdl recipe uses (its
+	# patches change the libtool script, not libltdl). It installs no
+	# pkg-config file: whether it is there is checked by its header.
+	DEP_PRJNAME="libtool"
+	DEP_VERSION="2.6.2"
+	DEP_DIRNAME="${DEP_PRJNAME}-${DEP_VERSION}"
+	DEP_ARCHIVE="${DEP_DIRNAME}.tar.xz"
+	DEP_SHA256="2ef1067c16c97db930fd740cc9bc3d3ba9a583804ae5ac42cc3e8719e49e191e"
+
+	warn_if_msys2_newer libltdl "${DEP_VERSION}"
+
+	FORCE=false
+	if [ x"${1-}" = x"-f" ] ; then FORCE=true ; fi
+
+	set +e
+	if [ x"$FORCE" = x"false" ] ; then
+		if [ -s "${PREFIX}/include/ltdl.h" ] ; then
+			echo "SKIP: '${PREFIX}/include/ltdl.h' exists" >&2
+			return 0
+		fi
+
+		# Quickly install if prebuilt
+		if [ -d "${WSDIR}/${DEP_DIRNAME}/.inst" ]; then (
+			cd "${WSDIR}/${DEP_DIRNAME}/.inst" || exit
+			(command -v rsync) && $SUDO rsync -cavPHK ./ / && exit
+			$SUDO cp -pr ./ / && exit
+			exit 1
+		) && {
+			echo "INST: (re-)applied '${WSDIR}/${DEP_DIRNAME}/.inst'" >&2
+			return 0
+		}
+		fi
+
+		# Not pre-built, fall through
+	fi
+
+	# (Re-)make and install from scratch
+	set -e
+
+	check_archive() {
+		if (command -v sha256sum) >/dev/null 2>/dev/null ; then
+			echo "${DEP_SHA256}  ${DEP_ARCHIVE}" | (cd "$DLDIR" && sha256sum -c -)
+		else
+			echo "WARNING: sha256sum not found, can not verify ${DEP_ARCHIVE}" >&2
+		fi
+	}
+
+	DEP_URL="https://ftpmirror.gnu.org/libtool/${DEP_ARCHIVE}"
+	if [ -s "$DLDIR/${DEP_ARCHIVE}" ] && check_archive ; then
+		echo "FETCH: reusing verified '$DLDIR/${DEP_ARCHIVE}'" >&2
+	else
+		echo "FETCH: ${DEP_ARCHIVE}..." >&2
+		rm -f "$DLDIR/${DEP_ARCHIVE}"
+		( cd "$DLDIR" && curl -fL "${DEP_URL}" > "${DEP_ARCHIVE}" ) || \
+		( cd "$DLDIR" && wget -c "${DEP_URL}" -O "${DEP_ARCHIVE}" )
+		check_archive || { echo "FAILED: checksum mismatch for $DLDIR/${DEP_ARCHIVE}" >&2 ; exit 1 ; }
+	fi
+
+	echo "BUILD: '${WSDIR}/${DEP_DIRNAME}/libltdl'..." >&2
+	cd "${WSDIR}" || exit
+	rm -rf ${DEP_DIRNAME} || echo ""
+
+	xz -dc "$DLDIR/${DEP_ARCHIVE}" | tar xf - || exit
+	cd "./${DEP_DIRNAME}/libltdl" || exit
+
+	date -u || true
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+		--enable-ltdl-install --enable-shared --enable-static \
+		|| { cat config.log ; exit 1; }
+
+	date -u || true
+	timed $MAKE || exit
+
+	date -u || true
+	INSTDIR="${WSDIR}/${DEP_DIRNAME}/.inst"
+	rm -rf "${INSTDIR}" || echo ""
+	timed $MAKE DESTDIR="${INSTDIR}" install || exit
+
+	# Summarize what we have got
+	date -u || true
+	find "${INSTDIR}" -type f -name "*.dll" -o -name "*.dll.a" -o -name "ltdl.h"
+
+	date -u || true
+	( cd "${INSTDIR}" && $SUDO cp -pr ./ / ) || exit
+	echo "INST: applied '${INSTDIR}'" >&2
+)
+
 provide_cppunit() (
 	# Needed for "make check" of the C++ client library (cppunittest,
 	# cppnit) where not packaged, e.g. MSYS2 MINGW32 or Linux cross-builds;
@@ -788,6 +880,15 @@ provide_nspr() (
 	case "${ARCH}" in
 		x86_64-*) NSPR_CONF64="--enable-64bit" ;;
 	esac
+
+	# NSPR builds tools which run during its build (config/nsinstall, now)
+	# with HOST_CC, which defaults to CC unless --target differs from --host:
+	# in Linux cross-builds, that would be the MinGW compiler
+	if [ -z "${MSYS2_PATH-}" ] && [ -n "${HOST_FLAG-}" ] ; then
+		[ -n "${HOST_CC-}" ] || HOST_CC="gcc"
+		[ -n "${HOST_CFLAGS-}" ] || HOST_CFLAGS="-O2"
+		export HOST_CC HOST_CFLAGS
+	fi
 
 	mkdir -p .build && cd .build || exit
 	date -u || true
@@ -1148,7 +1249,7 @@ provide_netsnmp() (
 	# NOTE: --disable-daemon may be from a different version,
 	# just in case present here to simplify variant builds.
 	date -u || true
-	yes "" | timed ./configure --prefix="${PREFIX}" --with-default-snmp-version=3 \
+	yes "" | timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} --with-default-snmp-version=3 \
 		--disable-agent --disable-daemon --with-sys-contact="" --with-sys-location="" \
 		--with-logfile=none --with-persistent-directory="${PREFIX}/var/net-snmp" \
 		--disable-embedded-perl --without-perl-modules --disable-perl-cc-checks \
@@ -1277,7 +1378,7 @@ provide_libmodbus_git() (
 	cd "./${DEP_DIRNAME}" || exit
 
 	date -u || true
-	timed "${DLDIR}/${DEP_DIRNAME}/configure" --prefix="${PREFIX}" --with-libusb --enable-static --disable-shared --enable-Werror \
+	timed "${DLDIR}/${DEP_DIRNAME}/configure" --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} --with-libusb --enable-static --disable-shared --enable-Werror \
 		|| { cat config.log ; exit 1 ; }
 
 	date -u || true
@@ -1308,10 +1409,13 @@ echo "Prepared environment for $0:" >&2
 set | ${EGREP} '^(ARCH|PREFIX|PREFIX_ROOT|PATH|MAKE|MAKEFLAGS|SUDO|DLDIR|WSDIR|CFLAGS|CXXFLAGS|LDFLAGS|PKG_CONFIG_PATH|BUILD_FLAG|HOST_FLAG|MINGW_CHOST|MINGW_PREFIX|MSYS2_PATH)=' >&2
 
 # Provide one prerequisite, if selected: $1 = provide_*() method name suffix,
-# $2 = pkg-config module (to report its file), $3 = title (for the CI log
-# group), the rest is passed to the method (e.g. "-f" to force a rebuild).
-# NUT_PREREQS_ONLY may list the method name suffixes to provide (default:
-# all), e.g. NUT_PREREQS_ONLY="libregex libusb" for a quick cross-build.
+# $2 = pkg-config module (to check and report its file), or a file path
+# relative to PREFIX (with a slash, e.g. for libltdl which has no .pc file),
+# $3 = title (for the CI log group), the rest is passed to the method (e.g.
+# "-f" to force a rebuild). NUT_PREREQS_ONLY may list the method name
+# suffixes to provide (default: all), e.g. NUT_PREREQS_ONLY="libregex libusb"
+# for a quick cross-build. The exit code is non-zero if any provided one is
+# then missing.
 RES=0
 provide_one() {
 	_name="$1" ; _pc="$2" ; _title="$3" ; shift 3
@@ -1323,15 +1427,19 @@ provide_one() {
 	fi
 	ci_group "Prerequisite: ${_title}"
 	"provide_${_name}" "$@"
-	ls -la "${PREFIX}/lib/pkgconfig/${_pc}.pc"
-	cat "${PREFIX}/lib/pkgconfig/${_pc}.pc"
-	RES=$?
+	case "${_pc}" in
+		*/*)	ls -la "${PREFIX}/${_pc}" || RES=1 ;;
+		*)	ls -la "${PREFIX}/lib/pkgconfig/${_pc}.pc" \
+			&& cat "${PREFIX}/lib/pkgconfig/${_pc}.pc" \
+			|| RES=1 ;;
+	esac
 }
 
 # TODO: params, help, etc...
 # For now, let it pass "-f" to the builder
 provide_one libregex regex "regex (TRE, systre)" "$@"
 provide_one libusb libusb-1.0 "libusb-1.0" "$@"
+provide_one libltdl include/ltdl.h "libltdl" "$@"
 provide_one cppunit cppunit "cppunit" "$@"
 provide_one nspr nspr "nspr" "$@"
 provide_one nss nss "nss" "$@"

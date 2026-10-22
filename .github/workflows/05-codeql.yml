@@ -197,11 +197,11 @@ jobs:
   # AppVeyor). Debian 13 "trixie" packages the UCRT toolchain (named
   # x86_64-w64-mingw32ucrt; configure gets the usual host triplet, which
   # older config.sub copies understand), Ubuntu 24.04 does not.
-  # Debian packages no MinGW builds of most NUT dependencies: the regex and
-  # libusb ones are cross-built by scripts/Windows/build-mingw-prereqs.sh
-  # before the CodeQL tracing starts; NUT is built without the others (e.g.
-  # no SSL, SNMP or nut-scanner), whose platform-independent code the job
-  # above analyzes.
+  # Debian packages no MinGW builds of most NUT dependencies: the regex,
+  # libusb and libltdl (for nut-scanner) ones are cross-built by
+  # scripts/Windows/build-mingw-prereqs.sh before the CodeQL tracing starts;
+  # NUT is built without the others (e.g. no SSL or SNMP), whose
+  # platform-independent code the job above analyzes.
   analyze-windows-cross:
     name: Analyze (Windows ${{ matrix.name }}, mingw-w64 cross-build)
     runs-on: ubuntu-24.04
@@ -239,7 +239,7 @@ jobs:
         # shellcheck disable=SC2086
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ${MINGW_PACKAGES} git ca-certificates curl patch make \
-            autoconf automake libtool pkgconf python3 perl dpkg-dev
+            autoconf automake libtool pkgconf python3 perl dpkg-dev xz-utils
 
     # The configure scripts look for the tools named after the host triplet
     # (e.g. x86_64-w64-mingw32-dlltool, -windres), which the UCRT toolchain
@@ -257,14 +257,14 @@ jobs:
         persist-credentials: false
 
     # Not traced by CodeQL (third-party code)
-    - name: Cross-build the regex and libusb prerequisites
+    - name: Cross-build the regex, libusb and libltdl prerequisites
       run: |
         HOST_FLAG="--host=${HOST}" \
         BUILD_FLAG="--build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE)" \
         ARCH="${HOST}" PREFIX="/usr/${TOOLCHAIN}" SUDO=" " \
         CC="${TOOLCHAIN}-gcc" CXX="${TOOLCHAIN}-g++" AR="${TOOLCHAIN}-ar" RANLIB="${TOOLCHAIN}-ranlib" \
         RC="${TOOLCHAIN}-windres" WINDRES="${TOOLCHAIN}-windres" \
-        DLDIR="${RUNNER_TEMP}/nut-win-deps" NUT_PREREQS_ONLY="libregex libusb" \
+        DLDIR="${RUNNER_TEMP}/nut-win-deps" NUT_PREREQS_ONLY="libregex libusb libltdl" \
             sh ./scripts/Windows/build-mingw-prereqs.sh
 
     - name: Initialize CodeQL

@@ -136,9 +136,17 @@ https://github.com/networkupstools/nut/milestone/13
       NSPR and NSS as well, with the same versions and patches as the MSYS2
       packages for 64-bit environments, so 32-bit builds also use NSS for
       SSL/TLS, and a POSIX regex library (TRE with a wrapper, like the MSYS2
-      `libsystre` package) for Linux cross-builds. It warns when MSYS2
-      packages a newer version of a dependency than it builds, and
-      `NUT_PREREQS_ONLY` can limit it to some of them.
+      `libsystre` package) and `libltdl` (for `nut-scanner`) for Linux
+      cross-builds. It warns when MSYS2 packages a newer version of a
+      dependency than it builds, `NUT_PREREQS_ONLY` can limit it to some of
+      them, and it now fails if any of them is missing in the end. The
+      `net-snmp` and `libmodbus` builds now get the cross-build flags too,
+      and the NSPR build a native compiler for its build-time tools.
+    * The `scripts/Windows/build-mingw-nut.sh` cross-build script now uses
+      the main `make install-win-bundle` recipe by default (the older own
+      logic, with `INSTALL_WIN_BUNDLE=false`, missed the GCC runtime DLLs,
+      so e.g. 32-bit `upsc` could not start), and supports the UCRT
+      toolchain of Debian 13 and newer (`TOOLCHAIN=x86_64-w64-mingw32ucrt`).
     * Rewrote `scripts/Windows/README.adoc` for the current practice: which
       MSYS2 environment to choose (C runtime, packages), the MSYS2 packages
       and prerequisites built from sources, building, testing and bundling
