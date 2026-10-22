@@ -81,6 +81,20 @@ discover_COMPILER_PATHS() {
 }
 discover_COMPILER_PATHS
 
+# See dllldd() below: e.g. /usr/x86_64-w64-mingw32ucrt for CC named
+# x86_64-w64-mingw32ucrt-gcc, if that directory exists
+discover_TC_PREFIX_DIR() {
+	TC_PREFIX_DIR=""
+	if [ -n "${CC-}" ] ; then
+		TC_PREFIX_DIR="`echo "${CC}" | awk '{print $1}'`"
+		TC_PREFIX_DIR="/usr/`basename "${TC_PREFIX_DIR}" | sed 's,-gcc$,,'`"
+		if [ x"${TC_PREFIX_DIR}" = x"/usr/" ] || [ ! -d "${TC_PREFIX_DIR}" ] ; then
+			TC_PREFIX_DIR=""
+		fi
+	fi
+}
+discover_TC_PREFIX_DIR
+
 # Only scan initialized data sections for DLL names (as older binutils did
 # by default), not the whole file: with debug info (-g3) most of our binary
 # size is debug sections, so a full scan produced ~200 times more text (all
@@ -179,7 +193,15 @@ dllldd_with_tools() (
 					OUT="`echo \"$SEARCH_INPUT_FILES\" | first_file_named \"$F\"`" \
 					&& [ -n "$OUT" ] && { echo "$OUT" ; SEEN="`expr $SEEN + 1`" ; continue ; }
 				fi
-				if [ -n "$ARCH" -a -d "/usr/${ARCH}" ] ; then
+				# The toolchain prefix, named after the compiler where
+				# that differs from the host triplet (e.g. CC set to
+				# x86_64-w64-mingw32ucrt-gcc for a UCRT build with
+				# ARCH=x86_64-w64-mingw32): the DLLs of the other C
+				# runtime (MSVCRT) would be found under /usr/${ARCH}
+				if [ -n "${TC_PREFIX_DIR}" ] ; then
+					OUT="`ls -1 \"${TC_PREFIX_DIR}/bin/$F\" \"${TC_PREFIX_DIR}/lib/$F\" 2>/dev/null || true`" \
+					&& [ -n "$OUT" ] && { echo "$OUT" ; SEEN="`expr $SEEN + 1`" ; continue ; }
+				elif [ -n "$ARCH" ] && [ -d "/usr/${ARCH}" ] ; then
 					OUT="`ls -1 \"/usr/${ARCH}/bin/$F\" \"/usr/${ARCH}/lib/$F\" 2>/dev/null || true`" \
 					&& [ -n "$OUT" ] && { echo "$OUT" ; SEEN="`expr $SEEN + 1`" ; continue ; }
 				fi
