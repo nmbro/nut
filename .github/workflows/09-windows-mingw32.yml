@@ -1,0 +1,164 @@
+# Build and test NUT for Windows as a 32-bit (i686) program in the MSYS2
+# MINGW32 environment (MSVCRT based, so it also runs on older Windows),
+# and publish the resulting bundle and its debug information as workflow
+# artifacts.
+#
+# This is a proof of concept for running the NUT for Windows CI builds on
+# GitHub-hosted runners: it calls the same step scripts as the AppVeyor
+# recipe (appveyor.yml), from .github/scripts/appveyor/, in the same order.
+# Those default to the AppVeyor setup (MSYS2 UCRT64, 64-bit); the variables
+# in "env" below select another MSYS2 environment and its specifics. MSYS2
+# is pre-installed on the GitHub-hosted Windows runners (in C:\msys64), so
+# no third-party action is needed to set it up. Several libraries are not
+# packaged by MSYS2 for MINGW32 (libusb, neon, cppunit...): they are built
+# from sources by scripts/Windows/build-mingw-prereqs.sh in the
+# 03-before_build step, as are net-snmp and libmodbus for all builds.
+#
+# Runs on pull_request (not pull_request_target), so for PRs from forks it
+# has a read-only token and runs the copy of this workflow in the PR, which
+# is fine as it needs no write permissions. Only master branch pushes save
+# the caches (which all runs restore), see .github/CI.md.
+
+name: "GHA-09: NUT for Windows, 32-bit (MSYS2 MINGW32)"
+
+on:
+  push:
+    branches:
+      - 'master'
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mingw32:
+    name: "Build, test and bundle NUT for Windows (i686, MINGW32)"
+    runs-on: windows-2025
+    timeout-minutes: 180
+    permissions:
+      contents: read
+
+    env:
+      # Read by the .github/scripts/appveyor/*.bat and *.ps1 step scripts:
+      NUT_MSYSTEM: MINGW32
+      # MSYS2 does not package NSS for MINGW32, OpenSSL it does:
+      NUT_SSL_VARIANTS: openssl
+      NUT_BUNDLE_ARCH: i686
+      NUT_BUNDLE_VERSION: gha-${{ github.run_number }}
+      NUT_STATEPATH: 'C:\nut-ci\nut-test'
+      # Read by scripts/Windows/build-mingw-prereqs.sh: where to download
+      # and build the prerequisites not packaged for MINGW32 (cached below)
+      DLDIR: /c/nut-ci/nut-win-deps
+      # Same settings as in appveyor.yml (with more cache space here):
+      CCACHE_DIR: 'C:/nut-ci/ccache'
+      CCACHE_MAXSIZE: 1500MiB
+      MSYS: "winsymlinks:nativestrict"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        # Full history and tags, for "git describe" based NUT version
+        fetch-depth: 0
+        fetch-tags: true
+        persist-credentials: false
+
+    - name: Restore cache of MSYS2 packages
+      id: cache-pacman
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\msys64\var\cache\pacman\pkg'
+        key: mingw32-pacman-${{ hashFiles('.github/scripts/appveyor/02-install.bat') }}
+        restore-keys: mingw32-pacman-
+
+    - name: Restore cache of prerequisites built from sources
+      id: cache-deps
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\nut-ci\nut-win-deps'
+        key: mingw32-deps-${{ hashFiles('scripts/Windows/build-mingw-prereqs.sh') }}
+        restore-keys: mingw32-deps-
+
+    - name: Restore cache of ccache
+      id: cache-ccache
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\nut-ci\ccache'
+        # Saved anew by each master build, restore the latest one
+        key: mingw32-ccache-${{ github.run_id }}
+        restore-keys: mingw32-ccache-
+
+    # The package databases of the runner image may be older than what
+    # the mirrors currently serve, so refresh them first
+    - name: Refresh MSYS2 package databases
+      shell: cmd
+      run: C:\msys64\usr\bin\bash -lc "pacman --noconfirm -Sy"
+
+    - name: "02: install MSYS2 packages"
+      shell: cmd
+      run: call .github\scripts\appveyor\02-install.bat
+
+    - name: "03: build prerequisites not packaged for MINGW32"
+      shell: cmd
+      run: call .github\scripts\appveyor\03-before_build.bat
+
+    - name: "04: build NUT"
+      shell: cmd
+      run: call .github\scripts\appveyor\04-build_script.bat
+
+    - name: "05: ccache statistics"
+      shell: cmd
+      run: call .github\scripts\appveyor\05-after_build.bat
+
+    - name: "07: make check (and spellcheck)"
+      shell: cmd
+      run: call .github\scripts\appveyor\07-test_script.bat
+
+    - name: "08: bundle and archive NUT for Windows"
+      shell: cmd
+      run: call .github\scripts\appveyor\08-after_test.bat
+
+    - name: "12: clean up ccache before saving it, report statistics"
+      shell: powershell
+      run: '& .github\scripts\appveyor\12-on_success.ps1'
+
+    - name: Upload the bundle archive
+      uses: actions/upload-artifact@v7
+      with:
+        name: NUT-for-Windows-i686-SNAPSHOT
+        path: NUT-for-Windows-i686-SNAPSHOT-*.7z
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Upload the debug information archive
+      uses: actions/upload-artifact@v7
+      with:
+        name: NUT-debuginfo-for-Windows-i686-SNAPSHOT
+        path: NUT-debuginfo-for-Windows-i686-SNAPSHOT-*.7z
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Save cache of MSYS2 packages
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.cache-pacman.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\msys64\var\cache\pacman\pkg'
+        key: ${{ steps.cache-pacman.outputs.cache-primary-key }}
+
+    - name: Save cache of prerequisites built from sources
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.cache-deps.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\nut-ci\nut-win-deps'
+        key: ${{ steps.cache-deps.outputs.cache-primary-key }}
+
+    - name: Save cache of ccache
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\nut-ci\ccache'
+        key: ${{ steps.cache-ccache.outputs.cache-primary-key }}

@@ -138,6 +138,11 @@ https://github.com/networkupstools/nut/milestone/13
       They also no longer install MSYS2 packages which they do not use
       (e.g. the MSYS `gcc`, `gdb`, and Python packages only needed for
       documentation builds), about a third less to download and cache.
+    * Introduced a GitHub Actions workflow (GHA-09) which builds, tests and
+      bundles NUT for Windows as a 32-bit program in the MSYS2 MINGW32
+      environment, as a proof of concept for running the NUT for Windows CI
+      builds there: it uses the same step scripts as the AppVeyor recipe,
+      which can now be told to use another MSYS2 environment.
     * The `ci_build.sh` script now exports custom `CFLAGS` et al also for
       MSYS2 builds with `ccache` (that problem was the `TMP` issue above),
       and prefers the `ccache` symlinks of the current MSYS2 environment.
