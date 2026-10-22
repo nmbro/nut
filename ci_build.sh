@@ -1211,7 +1211,10 @@ autogen_get_CONFIGURE_SCRIPT() {
         # FIXME later: any hash would do to detect changes
         # Paths below assume SCRIPTDIR (of ci_build.sh) is the source root
         AUTOCONF_FILES="`ls -1 \"${SCRIPTDIR}\"/configure.ac \"${SCRIPTDIR}\"/m4/*.m4 | sort`"
-        AUTOCONF_HASH="$({ cat ${AUTOCONF_FILES} ; uname -a ; } | somehash_filter)" \
+        # The OS details without the host name (POSIX "uname -n", part of
+        # "uname -a"), so that a cache can be shared by equivalent hosts,
+        # e.g. the ever-renamed GitHub Actions runners (GHA-09):
+        AUTOCONF_HASH="$({ cat ${AUTOCONF_FILES} ; uname -s -r -v -m ; } | somehash_filter)" \
         || AUTOCONF_HASH=''
 
         if [ -n "${AUTOCONF_HASH}" ]; then

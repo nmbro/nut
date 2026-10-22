@@ -8,7 +8,7 @@
 # * the archives made by 08-after_test.bat, their sizes and artifact links.
 #
 # Inputs (env): CACHE_<NAME>_HIT, CACHE_<NAME>_KEY and CACHE_<NAME>_PATH for
-# NAME in PACMAN, DEPS and CCACHE (outputs and paths of the cache restore
+# NAME in PACMAN, DEPS, CCACHE and AUTOCONF (outputs and paths of the cache restore
 # steps); ARTIFACT_BUNDLE_URL and ARTIFACT_DEBUGINFO_URL (upload steps);
 # NUT_MSYSTEM and CCACHE_DIR as for the build steps.
 # Everything is best-effort: this step never fails the build.
@@ -68,7 +68,7 @@ $lines.Add("")
 # Caches: how they were restored, and their sizes now (what a save would store)
 $lines.Add("| Cache | Restored | Size now |")
 $lines.Add("|---|---|---:|")
-foreach ($name in @("PACMAN", "DEPS", "CCACHE")) {
+foreach ($name in @("PACMAN", "DEPS", "CCACHE", "AUTOCONF")) {
     $hit = [Environment]::GetEnvironmentVariable("CACHE_${name}_HIT")
     $key = [Environment]::GetEnvironmentVariable("CACHE_${name}_KEY")
     $path = [Environment]::GetEnvironmentVariable("CACHE_${name}_PATH")

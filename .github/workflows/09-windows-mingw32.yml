@@ -62,6 +62,13 @@ jobs:
       CCACHE_DIR: 'C:/nut-ci/ccache'
       CCACHE_MAXSIZE: 1500MiB
       MSYS: "winsymlinks:nativestrict"
+      # Read by ci_build.sh: keep the "configure" results (config.cache) in
+      # this location (cached below); within it, ci_build.sh separates them
+      # by hashes of configure.ac, m4/*.m4, the OS and the configure options
+      # and environment, and retries without a cache that configure finds
+      # inconsistent
+      DO_USE_AUTOCONF_CACHE: 'yes'
+      CI_CACHE_NUT_BASEDIR: 'C:/nut-ci/autoconf'
 
     steps:
     # Git for Windows on the runners defaults to core.autocrlf=true, which
@@ -118,6 +125,30 @@ jobs:
       id: install
       shell: cmd
       run: call .github\scripts\appveyor\02-install.bat
+
+    # The "configure" results also depend on the installed MSYS2 package
+    # versions (compilers, libraries), which change without any change in
+    # our sources: hash their list for the cache key below
+    - name: Hash the installed MSYS2 package versions
+      id: pkgs
+      shell: powershell
+      run: |
+        $list = (& C:\msys64\usr\bin\bash -lc 'pacman -Q') -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw "pacman -Q exited with code $LASTEXITCODE" }
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hash = -join ($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($list)) | ForEach-Object { $_.ToString("x2") })
+        echo "hash of $(($list -split "`n").Count) installed packages: $hash"
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "hash=$hash" -Encoding ascii
+
+    # Only an exact key restores this cache: any change of the sources which
+    # define the configure checks and options, of the CI recipe, or of the
+    # installed packages means a "configure" from scratch (and a new cache)
+    - name: Restore cache of configure results
+      id: cache-autoconf
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\nut-ci\autoconf'
+        key: mingw32-autoconf-${{ hashFiles('configure.ac', 'm4/**', 'autogen.sh', 'ci_build.sh', 'scripts/Windows/build-mingw-prereqs.sh', '.github/workflows/09-windows-mingw32.yml', '.github/scripts/appveyor/02-install.bat', '.github/scripts/appveyor/03-before_build.bat', '.github/scripts/appveyor/04-build_script.bat') }}-${{ steps.pkgs.outputs.hash }}
 
     - name: "03: build prerequisites not packaged for MINGW32"
       id: prereqs
@@ -188,6 +219,15 @@ jobs:
         path: 'C:\nut-ci\ccache'
         key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
 
+    # After a successful build only, so that a configure which failed
+    # (perhaps due to its cached results) does not get cached
+    - name: Save cache of configure results
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.build.outcome == 'success' && steps.cache-autoconf.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\nut-ci\autoconf'
+        key: ${{ steps.cache-autoconf.outputs.cache-primary-key }}
+
     # Step durations, cache and ccache statistics and archive sizes, also
     # (especially) for failed builds
     - name: Report build statistics in the job summary
@@ -204,6 +244,9 @@ jobs:
         CACHE_CCACHE_HIT: ${{ steps.cache-ccache.outputs.cache-hit }}
         CACHE_CCACHE_KEY: ${{ steps.cache-ccache.outputs.cache-matched-key }}
         CACHE_CCACHE_PATH: 'C:\nut-ci\ccache'
+        CACHE_AUTOCONF_HIT: ${{ steps.cache-autoconf.outputs.cache-hit }}
+        CACHE_AUTOCONF_KEY: ${{ steps.cache-autoconf.outputs.cache-matched-key }}
+        CACHE_AUTOCONF_PATH: 'C:\nut-ci\autoconf'
         ARTIFACT_BUNDLE_URL: ${{ steps.upload-bundle.outputs.artifact-url }}
         ARTIFACT_DEBUGINFO_URL: ${{ steps.upload-debuginfo.outputs.artifact-url }}
       run: '& .github\scripts\windows-gha-summary.ps1'

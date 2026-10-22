@@ -151,7 +151,9 @@ https://github.com/networkupstools/nut/milestone/13
       builds there: it uses the same step scripts as the AppVeyor recipe,
       which can now be told to use another MSYS2 environment. Its job
       summary reports how long each step took, cache and `ccache` statistics
-      and the archive sizes, and long logs are folded into log groups.
+      and the archive sizes, and long logs are folded into log groups. It
+      also caches the `configure` results, keyed by the sources and scripts
+      which define them and by the installed MSYS2 package versions.
     * The CodeQL analysis (GHA-05) now also covers the Windows-specific
       code, with cross-builds for 32-bit (MSVCRT, like MSYS2 MINGW32) and
       64-bit (UCRT, like MSYS2 UCRT64) Windows using the Debian mingw-w64
@@ -160,7 +162,9 @@ https://github.com/networkupstools/nut/milestone/13
       MSYS2 builds with `ccache` (that problem was the `TMP` issue above),
       and prefers the `ccache` symlinks of the current MSYS2 environment.
       It also keeps a `CCACHE_DIR` set by the caller (e.g. a CI recipe which
-      caches that location), instead of always using `~/.ccache`.
+      caches that location), instead of always using `~/.ccache`. With
+      `DO_USE_AUTOCONF_CACHE`, its `config.cache` locations no longer depend
+      on the host name, so equivalent CI runners can share them.
     * Fixed `configure` script detection of `libgd` (for CGI programs) in
       32-bit Windows builds: its methods use the calling convention of the
       Windows API there, so the generic link test of `AC_SEARCH_LIBS()`,
