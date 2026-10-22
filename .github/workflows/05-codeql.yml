@@ -253,6 +253,7 @@ jobs:
         BUILD_FLAG="--build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE)" \
         ARCH="${HOST}" PREFIX="/usr/${TOOLCHAIN}" SUDO=" " \
         CC="${TOOLCHAIN}-gcc" CXX="${TOOLCHAIN}-g++" AR="${TOOLCHAIN}-ar" RANLIB="${TOOLCHAIN}-ranlib" \
+        RC="${TOOLCHAIN}-windres" WINDRES="${TOOLCHAIN}-windres" \
         DLDIR="${RUNNER_TEMP}/nut-win-deps" NUT_PREREQS_ONLY="libregex libusb" \
             sh ./scripts/Windows/build-mingw-prereqs.sh
 
@@ -277,7 +278,8 @@ jobs:
             --prefix=/ --with-all=auto --without-docs --disable-docs-changelog \
             --enable-warnings \
             CC="${TOOLCHAIN}-gcc" CXX="${TOOLCHAIN}-g++" \
-            AR="${TOOLCHAIN}-ar" RANLIB="${TOOLCHAIN}-ranlib" WINDRES="${TOOLCHAIN}-windres" \
+            AR="${TOOLCHAIN}-ar" RANLIB="${TOOLCHAIN}-ranlib" \
+            RC="${TOOLCHAIN}-windres" WINDRES="${TOOLCHAIN}-windres" WINDMC="${TOOLCHAIN}-windmc" \
             CFLAGS="${WINFLAGS}" CXXFLAGS="${WINFLAGS}" LDFLAGS="-L${TC_PREFIX}/lib/" \
             PKG_CONFIG_PATH="${TC_PREFIX}/lib/pkgconfig" PKG_CONFIG_LIBDIR="${TC_PREFIX}/lib/pkgconfig" \
         || { cat config.log ; exit 1 ; }

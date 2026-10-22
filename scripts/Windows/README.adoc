@@ -257,7 +257,8 @@ builds them when run without `MSYS2_PATH`. Its environment variables:
   the toolchain itself is, so `sudo` is used for that unless `SUDO=" "`);
 * `HOST_FLAG` (default `--host=$ARCH`) and `BUILD_FLAG` (by default
   `--build=` the `dpkg-architecture -qDEB_BUILD_GNU_TYPE` value);
-* `CC`, `CXX`, `AR`, `RANLIB` if the compiler names differ from the
+* `CC`, `CXX`, `AR`, `RANLIB` and the resource compiler (`RC` for libtool,
+  `WINDRES` and `WINDMC` for NUT) if the tool names differ from the
   `ARCH` (e.g. for the UCRT toolchain, with `ARCH=x86_64-w64-mingw32` for
   the `configure` scripts, as older `config.sub` copies do not know the
   `x86_64-w64-mingw32ucrt` name);
@@ -274,6 +275,7 @@ container):
    ARCH=x86_64-w64-mingw32 PREFIX="/usr/$TOOLCHAIN" \
    CC="$TOOLCHAIN-gcc" CXX="$TOOLCHAIN-g++" \
    AR="$TOOLCHAIN-ar" RANLIB="$TOOLCHAIN-ranlib" \
+   RC="$TOOLCHAIN-windres" WINDRES="$TOOLCHAIN-windres" \
    NUT_PREREQS_ONLY="libregex libusb" \
    ./scripts/Windows/build-mingw-prereqs.sh
 ----
