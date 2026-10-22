@@ -1,5 +1,5 @@
 #
-# Network UPS Tools: AppVeyor CI build recipe: NUT for Windows with MSYS2/MinGW x64
+# Network UPS Tools: AppVeyor CI build recipe: NUT for Windows with MSYS2 UCRT64 (x64)
 #
 # Copyright (C) 2022-2026	Jim Klimov <jimklimov+nut@gmail.com>
 #
@@ -137,6 +137,9 @@ on_success:
 artifacts:
   - path: 'NUT-for-Windows*.7z'
     name: Bundle of binary files and FOSS dependencies of NUT for Windows
+
+  - path: 'NUT-debuginfo-for-Windows*.7z'
+    name: Debug information (*.debug files) for the binary files of NUT for Windows
 
   - path: config.log
     name: config.log of recent build of NUT for Windows
