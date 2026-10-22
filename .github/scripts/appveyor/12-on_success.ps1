@@ -37,10 +37,9 @@ try {
     echo $msg
     if (Get-Command Add-AppveyorMessage -ErrorAction SilentlyContinue) {
         Add-AppveyorMessage $msg
-    } elseif ($env:GITHUB_STEP_SUMMARY) {
-        # GitHub Actions: show it in the job summary instead
-        Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $msg
     }
+    # On GitHub Actions, .github/scripts/windows-gha-summary.ps1 reports the
+    # ccache statistics (and more) in the job summary
 } catch {
     # Cleanup and statistics are best-effort, do not fail the build over them
     echo "SKIP: Could not report ccache statistics: $_"

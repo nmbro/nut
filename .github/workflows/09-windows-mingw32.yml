@@ -18,6 +18,10 @@
 # has a read-only token and runs the copy of this workflow in the PR, which
 # is fine as it needs no write permissions. Only master branch pushes save
 # the caches (which all runs restore), see .github/CI.md.
+#
+# The job summary reports the step durations, how the caches were restored
+# and their sizes, the ccache statistics and the archive sizes (see
+# .github/scripts/windows-gha-summary.ps1).
 
 name: "GHA-09: NUT for Windows, 32-bit (MSYS2 MINGW32)"
 
@@ -41,6 +45,8 @@ jobs:
     timeout-minutes: 180
     permissions:
       contents: read
+      # For the job summary: read the step durations of this run
+      actions: read
 
     env:
       # Read by the .github/scripts/appveyor/*.bat and *.ps1 step scripts:
@@ -138,6 +144,7 @@ jobs:
       run: '& .github\scripts\appveyor\12-on_success.ps1'
 
     - name: Upload the bundle archive
+      id: upload-bundle
       uses: actions/upload-artifact@v7
       with:
         name: NUT-for-Windows-i686-SNAPSHOT
@@ -146,6 +153,7 @@ jobs:
         retention-days: 14
 
     - name: Upload the debug information archive
+      id: upload-debuginfo
       uses: actions/upload-artifact@v7
       with:
         name: NUT-debuginfo-for-Windows-i686-SNAPSHOT
@@ -173,3 +181,23 @@ jobs:
       with:
         path: 'C:\nut-ci\ccache'
         key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
+
+    # Step durations, cache and ccache statistics and archive sizes, also
+    # (especially) for failed builds
+    - name: Report build statistics in the job summary
+      if: ${{ !cancelled() }}
+      shell: powershell
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CACHE_PACMAN_HIT: ${{ steps.cache-pacman.outputs.cache-hit }}
+        CACHE_PACMAN_KEY: ${{ steps.cache-pacman.outputs.cache-matched-key }}
+        CACHE_PACMAN_PATH: 'C:\msys64\var\cache\pacman\pkg'
+        CACHE_DEPS_HIT: ${{ steps.cache-deps.outputs.cache-hit }}
+        CACHE_DEPS_KEY: ${{ steps.cache-deps.outputs.cache-matched-key }}
+        CACHE_DEPS_PATH: 'C:\nut-ci\nut-win-deps'
+        CACHE_CCACHE_HIT: ${{ steps.cache-ccache.outputs.cache-hit }}
+        CACHE_CCACHE_KEY: ${{ steps.cache-ccache.outputs.cache-matched-key }}
+        CACHE_CCACHE_PATH: 'C:\nut-ci\ccache'
+        ARTIFACT_BUNDLE_URL: ${{ steps.upload-bundle.outputs.artifact-url }}
+        ARTIFACT_DEBUGINFO_URL: ${{ steps.upload-debuginfo.outputs.artifact-url }}
+      run: '& .github\scripts\windows-gha-summary.ps1'
