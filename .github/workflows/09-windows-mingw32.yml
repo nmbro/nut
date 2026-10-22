@@ -30,6 +30,8 @@ on:
   push:
     branches:
       - 'master'
+      # TEMPORARY, for a cache save test on a fork only, do not merge:
+      - 'gha09-cache-test'
   pull_request:
   workflow_dispatch:
 
@@ -214,21 +216,21 @@ jobs:
     # for master branch builds in appveyor.yml); ccache after any build attempt
     # (04-build_script.bat enforces its max_size also when the build failed)
     - name: Save cache of MSYS2 packages
-      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.install.outcome == 'success' && steps.cache-pacman.outputs.cache-hit != 'true' }}
+      if: ${{ !cancelled() && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/gha09-cache-test') && steps.install.outcome == 'success' && steps.cache-pacman.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: 'C:\msys64\var\cache\pacman\pkg'
         key: ${{ steps.cache-pacman.outputs.cache-primary-key }}
 
     - name: Save cache of prerequisites built from sources
-      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.prereqs.outcome == 'success' && steps.cache-deps.outputs.cache-hit != 'true' }}
+      if: ${{ !cancelled() && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/gha09-cache-test') && steps.prereqs.outcome == 'success' && steps.cache-deps.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: 'C:\nut-ci\nut-win-deps'
         key: ${{ steps.cache-deps.outputs.cache-primary-key }}
 
     - name: Save cache of ccache
-      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
+      if: ${{ !cancelled() && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/gha09-cache-test') && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
       uses: actions/cache/save@v6
       with:
         path: 'C:\nut-ci\ccache'
@@ -237,7 +239,7 @@ jobs:
     # After a successful build only, so that a configure which failed
     # (perhaps due to its cached results) does not get cached
     - name: Save cache of configure results
-      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.build.outcome == 'success' && steps.cache-autoconf.outputs.cache-hit != 'true' }}
+      if: ${{ !cancelled() && github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/gha09-cache-test') && steps.build.outcome == 'success' && steps.cache-autoconf.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: 'C:\nut-ci\autoconf'
