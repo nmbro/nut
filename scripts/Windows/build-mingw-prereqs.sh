@@ -59,6 +59,18 @@ ci_endgroup() {
 	fi
 }
 
+# Run (and time) a build step: "time" is a keyword in bash (e.g. the /bin/sh
+# of MSYS2), but neither a keyword nor a builtin in some other shells (e.g.
+# dash, the /bin/sh of Debian), where the "time" program may be missing too
+# (e.g. in minimal containers): then just run the command.
+timed() {
+	if (command -v time) >/dev/null 2>/dev/null ; then
+		time "$@"
+	else
+		"$@"
+	fi
+}
+
 prepareEnv() {
 	[ -n "${GREP}" ] || {
 		GREP="`command -v grep`" \
@@ -318,16 +330,16 @@ provide_libregex() (
 	patch -p1 -i "${SRCDIR_SYSTRE}/002-pointer-cast.patch" || exit
 
 	date -u || true
-	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
 		--enable-shared --enable-static --disable-nls --without-libintl-prefix \
 		|| { cat config.log ; exit 1; }
 
 	date -u || true
-	time $MAKE || exit
+	timed $MAKE || exit
 
 	INSTDIR="${WSDIR}/${DEP_DIRNAME}/.inst"
 	rm -rf "${INSTDIR}" || echo ""
-	time $MAKE DESTDIR="${INSTDIR}" install || exit
+	timed $MAKE DESTDIR="${INSTDIR}" install || exit
 
 	# The systre wrapper (MSYS2 builds it with meson, but it is one file):
 	# a static library and a DLL, named and aliased like in the MSYS2 package
@@ -457,25 +469,25 @@ provide_libusb() (
 	cd "./${DEP_DIRNAME}" || exit
 
 	date -u || true
-	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
 		--disable-examples-build --disable-tests-build \
 		|| { cat config.log ; exit 1; }
 
 	date -u || true
-	time $MAKE || exit
+	timed $MAKE || exit
 
 	# Beside leaving a pre-install location for future runs,
 	# this may build some more artifacts:
 	date -u || true
 	rm -rf "`pwd`/.inst" || echo ""
-	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
 
 	# Summarize what we have got
 	date -u || true
 	find ./ -type f -name "*.dll" -o -name "*.dll.a";
 
 	date -u || true
-	time $SUDO $MAKE install
+	timed $SUDO $MAKE install
 	date -u || true
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
@@ -558,25 +570,25 @@ provide_cppunit() (
 	cd "./${DEP_DIRNAME}" || exit
 
 	date -u || true
-	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
 		--disable-doxygen \
 		|| { cat config.log ; exit 1; }
 
 	date -u || true
-	time $MAKE || exit
+	timed $MAKE || exit
 
 	# Beside leaving a pre-install location for future runs,
 	# this may build some more artifacts:
 	date -u || true
 	rm -rf "`pwd`/.inst" || echo ""
-	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
 
 	# Summarize what we have got
 	date -u || true
 	find ./ -type f -name "*.dll" -o -name "*.dll.a";
 
 	date -u || true
-	time $SUDO $MAKE install
+	timed $SUDO $MAKE install
 	date -u || true
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
@@ -661,26 +673,26 @@ provide_neon() (
 	cd "./${DEP_DIRNAME}" || exit
 
 	date -u || true
-	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
 		--with-ssl=openssl --with-expat --disable-nls \
 		--enable-shared --disable-static \
 		|| { cat config.log ; exit 1; }
 
 	date -u || true
-	time $MAKE || exit
+	timed $MAKE || exit
 
 	# Beside leaving a pre-install location for future runs,
 	# this may build some more artifacts:
 	date -u || true
 	rm -rf "`pwd`/.inst" || echo ""
-	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
 
 	# Summarize what we have got
 	date -u || true
 	find ./ -type f -name "*.dll" -o -name "*.dll.a";
 
 	date -u || true
-	time $SUDO $MAKE install
+	timed $SUDO $MAKE install
 	date -u || true
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
@@ -780,21 +792,21 @@ provide_nspr() (
 	mkdir -p .build && cd .build || exit
 	date -u || true
 	CFLAGS="$CFLAGS -std=gnu17 -Wno-incompatible-pointer-types" \
-	time ../configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+	timed ../configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
 		--target="${ARCH}" \
 		--includedir="${PREFIX}/include/nspr" \
 		--enable-optimize --disable-debug ${NSPR_CONF64} \
 		|| { cat config.log ; exit 1; }
 
 	date -u || true
-	time $MAKE || exit
+	timed $MAKE || exit
 
 	# The pre-install location for future runs, laid out like the MSYS2
 	# package (DLLs in bin/)
 	date -u || true
 	INSTDIR="${WSDIR}/${DEP_DIRNAME}/.inst"
 	rm -rf "${INSTDIR}" || echo ""
-	time $MAKE DESTDIR="${INSTDIR}" install || exit
+	timed $MAKE DESTDIR="${INSTDIR}" install || exit
 	mkdir -p "${INSTDIR}${PREFIX}/bin"
 	mv -f "${INSTDIR}${PREFIX}"/lib/*.dll "${INSTDIR}${PREFIX}/bin/"
 	rm -rf "${INSTDIR}${PREFIX}/bin/compile-et.pl" "${INSTDIR}${PREFIX}/bin/prerr.properties" \
@@ -908,7 +920,7 @@ provide_nss() (
 		NSPR_INCLUDE_DIR NSPR_LIB_DIR SQLITE_LIB_DIR EXTRA_SHARED_LIBS
 
 	date -u || true
-	time $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
+	timed $MAKE -C nss OS_TARGET=WINNT OS_RELEASE=5.0 XP_WIN=1 \
 		NS_USE_GCC=1 ${NSS_CONF64} \
 		NSS_USE_SYSTEM_SQLITE=1 USE_SYSTEM_ZLIB=1 ZLIB_LIBS="${PREFIX}/lib/libz.dll.a" \
 		|| exit
@@ -1048,7 +1060,7 @@ provide_libgd() (
 	cd "./${DEP_DIRNAME}" || exit
 
 	date -u || true
-	time ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
+	timed ./configure --prefix="${PREFIX}" ${HOST_FLAG-} ${BUILD_FLAG-} \
 		--with-png --with-zlib \
 		--without-freetype --without-fontconfig --without-raqm \
 		--without-jpeg --without-tiff --without-webp --without-xpm \
@@ -1056,20 +1068,20 @@ provide_libgd() (
 		|| { cat config.log ; exit 1; }
 
 	date -u || true
-	time $MAKE || exit
+	timed $MAKE || exit
 
 	# Beside leaving a pre-install location for future runs,
 	# this may build some more artifacts:
 	date -u || true
 	rm -rf "`pwd`/.inst" || echo ""
-	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
 
 	# Summarize what we have got
 	date -u || true
 	find ./ -type f -name "*.dll" -o -name "*.dll.a";
 
 	date -u || true
-	time $SUDO $MAKE install
+	timed $SUDO $MAKE install
 	date -u || true
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
@@ -1136,7 +1148,7 @@ provide_netsnmp() (
 	# NOTE: --disable-daemon may be from a different version,
 	# just in case present here to simplify variant builds.
 	date -u || true
-	yes "" | time ./configure --prefix="${PREFIX}" --with-default-snmp-version=3 \
+	yes "" | timed ./configure --prefix="${PREFIX}" --with-default-snmp-version=3 \
 		--disable-agent --disable-daemon --with-sys-contact="" --with-sys-location="" \
 		--with-logfile=none --with-persistent-directory="${PREFIX}/var/net-snmp" \
 		--disable-embedded-perl --without-perl-modules --disable-perl-cc-checks \
@@ -1144,20 +1156,20 @@ provide_netsnmp() (
 		--enable-shared || { cat config.log ; exit 1; }
 
 	date -u || true
-	time $MAKE LDFLAGS="-no-undefined -lws2_32 -lregex -Xlinker --ignore-unresolved-symbol=_app_name_long -Xlinker --ignore-unresolved-symbol=app_name_long" || exit
+	timed $MAKE LDFLAGS="-no-undefined -lws2_32 -lregex -Xlinker --ignore-unresolved-symbol=_app_name_long -Xlinker --ignore-unresolved-symbol=app_name_long" || exit
 
 	# Beside leaving a pre-install location for future runs,
 	# this may build some more artifacts:
 	date -u || true
 	rm -rf "`pwd`/.inst" || echo ""
-	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
 
 	# Summarize what we have got
 	date -u || true
 	find ./ -type f -name "*.dll" -o -name "*.dll.a";
 
 	date -u || true
-	time $SUDO $MAKE install
+	timed $SUDO $MAKE install
 	date -u || true
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
@@ -1265,27 +1277,27 @@ provide_libmodbus_git() (
 	cd "./${DEP_DIRNAME}" || exit
 
 	date -u || true
-	time "${DLDIR}/${DEP_DIRNAME}/configure" --prefix="${PREFIX}" --with-libusb --enable-static --disable-shared --enable-Werror \
+	timed "${DLDIR}/${DEP_DIRNAME}/configure" --prefix="${PREFIX}" --with-libusb --enable-static --disable-shared --enable-Werror \
 		|| { cat config.log ; exit 1 ; }
 
 	date -u || true
-	time $MAKE || exit
+	timed $MAKE || exit
 
 	date -u || true
-	time $MAKE check || echo "WARNING: make check is flaky or failed outright" >&2
+	timed $MAKE check || echo "WARNING: make check is flaky or failed outright" >&2
 
 	# Beside leaving a pre-install location for future runs,
 	# this may build some more artifacts:
 	date -u || true
 	rm -rf "`pwd`/.inst" || echo ""
-	time $MAKE DESTDIR="`pwd`/.inst" install || exit
+	timed $MAKE DESTDIR="`pwd`/.inst" install || exit
 
 	# Summarize what we have got
 	date -u || true
 	find ./ -type f -name "*.dll" -o -name "*.a"
 
 	date -u || true
-	time $SUDO $MAKE install
+	timed $SUDO $MAKE install
 	date -u || true
 	echo "INST: ran 'make install' from '${WSDIR}/${DEP_DIRNAME}'" >&2
 )
