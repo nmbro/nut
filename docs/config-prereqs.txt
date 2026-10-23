@@ -1938,16 +1938,121 @@ programs.
 
 Further TODO for Windows would include:
 
-* MSVCRT (ubiquitous) vs. UCRT (more standards compliant, but since Windows 10)
-  https://docs.microsoft.com/en-us/cpp/porting/upgrade-your-code-to-the-universal-crt?view=msvc-160
-
 * libusb-0.1 vs. libusb-1.0
+
+Supported Windows versions
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The NUT source code aims to support Windows 7 SP1 and newer, in both 32-bit
+(`i686`) and 64-bit (`x86_64`) builds. While libusb-1.0 itself supports
+Windows Vista, the tools to bind a UPS to the WinUSB driver (Zadig, and
+libwdi behind it which `scripts/Windows/DriverInstaller` also uses) require
+Windows 7 or newer.
+
+Which Windows versions a particular build of NUT runs on depends however
+on the toolchain and on the third-party libraries delivered with it:
+
+* MSYS2 UCRT64 and CLANG64 environments (and their packages, such as
+  OpenSSL, NSS, neon or libusb) target Windows 10 and newer, so NUT built
+  there (including the AppVeyor CI snapshots) is meant for Windows 10 and
+  Windows 11.
+* MSYS2 MINGW32 and MINGW64 toolchains can still target Windows 7 and newer,
+  but these environments package fewer of the libraries NUT can use (see
+  below), and MSYS2 no longer supports Windows 7, 8 and 8.1 itself. See
+  https://www.msys2.org/docs/windows_support/ for details.
+
+WARNING: Running NUT for Windows on Windows 7, 8 or 8.1 is not regularly
+tested. If you need that, check that each of the delivered third-party
+libraries (DLL files) also works on the target system.
+
+The C runtime library used by a build also matters:
+
+* MSVCRT builds (e.g. MSYS2 MINGW64 and MINGW32 environments, most mingw
+  cross-builds) use the `msvcrt.dll` which comes with every Windows version.
+* UCRT builds (e.g. MSYS2 UCRT64 and CLANG64 environments) use the Universal
+  C Runtime, which is part of Windows 10 and newer. On Windows 7 SP1, 8 and
+  8.1 it must be installed as an update (KB2999226, also delivered by Windows
+  Update and by the Visual C++ 2015 or newer redistributable packages), see
+  https://learn.microsoft.com/en-us/cpp/windows/universal-crt-deployment
+  and for differences from MSVCRT also
+  https://learn.microsoft.com/en-us/cpp/porting/upgrade-your-code-to-the-universal-crt
+
+The Windows API version which the headers expose is selected by the
+`_WIN32_WINNT` macro; its values are hexadecimal Windows version numbers,
+e.g.:
+
+[options="header"]
+|===
+| `_WIN32_WINNT` | Windows version
+| `0x0601`       | Windows 7 (the oldest version NUT sources aim to support)
+| `0x0602`       | Windows 8
+| `0x0603`       | Windows 8.1
+| `0x0A00`       | Windows 10 and Windows 11
+|===
+
+The `scripts/Windows/build-mingw-nut.sh` and `ci_build.sh` builds use
+`-D_WIN32_WINNT=0xffff` (all APIs the headers know of), and current
+MinGW-w64 headers default to Windows 10. To check that NUT does not use
+anything newer than Windows 7, you can build it with the corresponding
+value, so that such uses fail to compile:
+
+----
+# 0x0601 is Windows 7
+:; ./configure --enable-Werror CFLAGS="-g -O2 -D_WIN32_WINNT=0x0601" \
+    CXXFLAGS="-g -O2 -D_WIN32_WINNT=0x0601"
+----
 
 NOTE: Native mingw, MSYS2, etc. builds on Windows are known to suffer from
 interaction with antivirus software which holds executable files open and
 so not writable by the linker. This may cause random steps in the `configure`
 script or later during the build to fail. If that happens to you, disable the
 antivirus completely or exempt at least the NUT build area from protection.
+
+App-local UCRT for older Windows versions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Programs built against the Universal C Runtime (e.g. in MSYS2 UCRT64 and
+CLANG64 environments) need it to start. UCRT is a part of Windows 10 and
+newer; on Windows 7 SP1, 8 and 8.1 it is an update (KB2999226 and later
+ones) which is not always installed. As an alternative, the UCRT DLL files
+can be delivered "app-locally" in the same directory as each EXE file, see
+https://learn.microsoft.com/en-us/cpp/windows/universal-crt-deployment
+
+The DLL files which may be delivered this way (`ucrtbase.dll` and the
+`api-ms-win-*.dll` forwarders) come with the Windows 10 or Windows 11 SDK,
+in a directory like
+`C:\Program Files (x86)\Windows Kits\10\Redist\<SDK version>\ucrt\DLLs\x64`
+(`x86` for 32-bit builds; older SDK versions lack the `<SDK version>` part).
+They are not a part of MSYS2 nor mingw packages, so `make install-win-bundle`
+only delivers them when asked to, with a `WIN_BUNDLE_UCRT_DIR` make (or
+environment) variable set to either such directory, or to `auto` to look
+for an installed SDK (using `UniversalCRTSdkDir` or `WindowsSdkDir`
+environment variables, if set, or the default installation location):
+
+----
+:; make install-win-bundle DESTDIR=/c/NUT4Win WIN_BUNDLE_UCRT_DIR=auto
+----
+
+The DLL files are only copied if the installed programs import UCRT, so
+the setting is harmless for MSVCRT builds. An explicitly specified directory
+without `ucrtbase.dll` is an error, while `auto` only warns if no SDK was
+found.
+
+Keep in mind that:
+
+* On Windows 10 and newer, the system UCRT is always used, even if a copy
+  is delivered next to the program, so the copy only matters for older
+  Windows versions. Windows 7 requires the Service Pack 1.
+* This only provides the C runtime library. The third-party libraries in
+  the bundle (e.g. from MSYS2 UCRT64 packages, which target Windows 10 and
+  newer) may still need system APIs which older Windows versions lack.
+* Microsoft does not recommend the app-local deployment, for performance
+  and security reasons (e.g. such a copy is not updated by Windows Update),
+  and prefers the central deployment of UCRT.
+* Only the files named in the `Redist.txt` list (or the online "REDIST list")
+  of the Windows SDK which they came from may be redistributed, under its
+  license terms; check them for your SDK version before you publish such
+  a bundle.
 
 Windows with mingw
 ^^^^^^^^^^^^^^^^^^
@@ -2032,18 +2137,30 @@ NOTE: Suggestions below use `x86_64` generic variants where possible, and
 `clang` where available to try both build toolkits on the platform. If you
 want to build `i686` (32-bit) or alternate backends (e.g. `ucrt` instead
 of default `msvcrt`), poke the repository search to see what is available.
+For the "MSYS2 UCRT64" environment, replace the `mingw-w64-x86_64-` prefix
+of package names with `mingw-w64-ucrt-x86_64-` (and for "MSYS2 MINGW32"
+with `mingw-w64-i686-`).
+
+NOTE: MSYS2 has been reducing the package sets of its MSVCRT-based
+environments. As of late 2026, the "MINGW64" environment no longer offers
+`libusb` (1.0) nor `neon`, so NUT built there would lack USB and XML drivers;
+the "UCRT64" environment provides both of these. The "MINGW32" (32-bit)
+environment offers a compiler toolchain but few other packages; the
+`scripts/Windows/build-mingw-prereqs.sh` script builds the missing ones
+(see `scripts/Windows/README.adoc`).
 
 NOTE: To build NUT with `ci_build.sh` (and generally -- to help `configure`
 script find the dependencies listed below), start the terminal session with
-"MSYS2 MinGW x64" shortcut. Other options set up the environment variables
+the "MSYS2 UCRT64" shortcut (historically "MSYS2 MinGW x64" was suggested,
+see the note above). Other options set up the environment variables
 for toolkits listed in their shortcut names, and so tend to prefer "wrong"
 flags and paths to dependencies (if you have several variants installed).
-The "MSYS2 MinGW UCRT x64" was also reported to work.
 
 To avoid toolkit variant mismatches, you may require to use their specific
-builds preferentially:
+builds preferentially (e.g. `/ucrt64/bin` for "UCRT64", or `/mingw64/bin`
+for "MINGW64"):
 ----
-PATH="/mingw64/bin:$PATH"
+PATH="/ucrt64/bin:$PATH"
 export PATH
 ----
 ...and also add these lines to the `~/.bashrc` file.
@@ -2135,12 +2252,9 @@ involved is very important.
 
 Notable packages *not found* in the repo:
 
-* snmp (net-snmp, ucd-snmp) -- instructions in `scripts/Windows/README.adoc`
-  document now covers building it from source in MSYS2 MinGW x64 environment,
-  essentially same as for Linux cross builds with proper `ARCH` and `PREFIX`
-* libregex (C version, direct NUT `configure` script support was added by
-  the Windows branch); MSYS2 however includes `libpcre` pulled by some
-  of the dependencies above...
+* snmp (net-snmp, ucd-snmp) -- the `scripts/Windows/build-mingw-prereqs.sh`
+  script builds it from sources (as well as other dependencies which the
+  current MSYS2 environment does not package), see `scripts/Windows/README.adoc`
 * augeas
 * avahi
 * powerman

@@ -24,6 +24,7 @@ EXTRA_DIST = \
 	winevent.mc				\
 	build-mingw-nut.sh			\
 	build-mingw-prereqs.sh			\
+	Dockerfile.cross-build			\
 	dllldd.sh				\
 	README.adoc				\
 	DriverInstaller/wdi-simple.c		\

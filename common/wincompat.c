@@ -174,12 +174,7 @@ int sktclose(int fh)
 }
 
 #if ! HAVE_INET_NTOP
-# if (0)
-/* Some old winapi? or just sloppy original commits? */
-const char* inet_ntop(int af, const void* src, char* dst, int cnt)
-# else
 const char* inet_ntop(int af, const void* src, char* dst, size_t cnt)
-# endif
 {
 /* Instead of WSAAddressToString() consider getnameinfo() if this would in fact
  * return decorated addresses (brackets, ports...) as discussed below:
@@ -478,7 +473,17 @@ void syslog(int priority, const char *fmt, ...)
 	va_end(ap);
 
 	/* Add progname to the formated message */
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+	/* Cutting off a long message to fit is acceptable here */
 	snprintf(buf2, sizeof(buf2), "%s - %s", EventLogName, buf1);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 
 	/* Create the frame */
 	/* first 4 bytes are priority */
@@ -724,7 +729,7 @@ void pipe_create(const char * pipe_name)
 	}
 }
 
-void pipe_connect()
+void pipe_connect(void)
 {
 	/* We have detected a connection on the opened pipe. So we start by saving its handle and create a new pipe for future connections */
 	pipe_conn_t	*conn;

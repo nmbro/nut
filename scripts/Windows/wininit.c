@@ -285,7 +285,7 @@ static DWORD test_powerdownflag(void)
 		res = GetExitCodeProcess(ProcessInformation.hProcess, &status);
 		if (res != 0) {
 			if (status != STILL_ACTIVE) {
-				upsdebugx(1, "%s: powerdownflag check returned: %d", __func__, status);
+				upsdebugx(1, "%s: powerdownflag check returned: %" PRIuDWORD, __func__, status);
 				return status;
 			}
 		}
@@ -325,7 +325,17 @@ static int parse_nutconf(BOOL start_flag)
 
 	nutf = fopen(fn, "r");
 	if (nutf == NULL) {
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+		/* Cutting off a long message to fit is acceptable here */
 		snprintf(buf, sizeof(buf), "Error opening %s", fn);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 		print_event(LOG_ERR, buf);
 		return 0;
 	}
@@ -384,10 +394,20 @@ static int parse_nutconf(BOOL start_flag)
 	}
 
 	GetFullPathName(fn, sizeof(fullname), fullname, NULL);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic push
+#endif
+#ifdef HAVE_PRAGMA_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+	/* Cutting off a long message to fit is acceptable here */
 	snprintf(buf, sizeof(buf),
 		"NUT disabled, please adjust the configuration to your needs. "
 		"Then set MODE to a suitable value in %s to enable it.",
 		fullname);
+#ifdef HAVE_PRAGMAS_FOR_GCC_DIAGNOSTIC_IGNORED_FORMAT_TRUNCATION
+#pragma GCC diagnostic pop
+#endif
 	print_event(LOG_ERR, buf);
 	return 0;
 }
@@ -563,7 +583,7 @@ static void ReportSvcStatus(
 	SvcStatus.dwWaitHint = WaitHint;
 
 	/* FIXME: Find a way to stringify? */
-	upsdebugx(2, "%s: reporting transition to status %d", __func__, CurrentState);
+	upsdebugx(2, "%s: reporting transition to status %" PRIuDWORD, __func__, CurrentState);
 
 	if (CurrentState == SERVICE_START_PENDING)
 		SvcStatus.dwControlsAccepted = 0;

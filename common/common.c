@@ -1173,12 +1173,32 @@ char * getprocname(pid_t pid)
 	upsdebugx(5, "%s: begin to query WIN32 process info", __func__);
 	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
 	if (process) {
-		DWORD	ret = GetModuleFileNameExA(
+		/* QueryFullProcessImageNameA() (Vista+) is documented to work
+		 * with PROCESS_QUERY_LIMITED_INFORMATION access, while
+		 * GetModuleFileNameExA() requires PROCESS_QUERY_INFORMATION
+		 * and PROCESS_VM_READ (older Windows versions enforce that
+		 * for other processes than our own), so try it first */
+		DWORD	pathnamesize = (DWORD)(sizeof(pathname));
+		DWORD	ret = 0;
+
+		if (QueryFullProcessImageNameA(process, 0, (LPSTR)pathname, &pathnamesize)) {
+			ret = pathnamesize;
+		} else {
+			upsdebugx(3, "%s: QueryFullProcessImageNameA() failed for PID %"
+				PRIuMAX ": error %" PRIuDWORD ", trying GetModuleFileNameExA()",
+				__func__, (uintmax_t)pid, GetLastError());
+			ret = GetModuleFileNameExA(
 				process,	/* hProcess */
 				NULL,		/* hModule */
 				(LPSTR)pathname,
 				(DWORD)(sizeof(pathname))
 			);
+			if (!ret) {
+				upsdebugx(3, "%s: GetModuleFileNameExA() failed for PID %"
+					PRIuMAX ": error %" PRIuDWORD,
+					__func__, (uintmax_t)pid, GetLastError());
+			}
+		}
 		CloseHandle(process);
 		pathname[sizeof(pathname) - 1] = '\0';
 
@@ -1192,7 +1212,7 @@ char * getprocname(pid_t pid)
 				__func__);
 			if (ret != procnamelen) {
 				upsdebugx(3, "%s: length mismatch getting WIN32 process info: %"
-					PRIuMAX " vs. " PRIuSIZE,
+					PRIuMAX " vs. %" PRIuSIZE,
 					__func__, (uintmax_t)ret, procnamelen);
 			}
 
@@ -1234,9 +1254,16 @@ char * getprocname(pid_t pid)
 
 			/* Fall through to try /proc etc. if available */
 		} else {
-			upsdebug_with_errno(3,
-				"%s: failed to get WIN32 process info", __func__);
+			/* Error codes were logged above (errno is not set) */
+			upsdebugx(3, "%s: failed to get WIN32 process info", __func__);
 		}
+	} else {
+		/* e.g. 87 (ERROR_INVALID_PARAMETER) if no such process runs
+		 * (anymore), or 5 (ERROR_ACCESS_DENIED) for some processes of
+		 * other users, services or protected processes */
+		upsdebugx(3, "%s: OpenProcess() failed for PID %" PRIuMAX
+			": error %" PRIuDWORD,
+			__func__, (uintmax_t)pid, GetLastError());
 	}
 #endif	/* WIN32 */
 
@@ -2863,9 +2890,15 @@ char *xbasename_no_ext(const char *file)
 			if (s && (bn_len == (size_t)(s - cs))) {
 				/* s points to first character that matches exeext,
 				 * this character is what we already do not want */
-				bn = (char*)xmalloc(bn_len + 1);
+				bn = (char*)xmalloc(bn_len + 2);
+				memset(bn, 0, bn_len + 2);
 				/* Extract first bn_len characters, add '\0' in the end */
-				snprintf(bn, bn_len, "%s", cs);
+				snprintf(bn, bn_len + 1, "%s", cs);
+				/* Just to be sure, hopefully we simply get two '\0' chars in the end.
+				 * NOTE: Older platform builds with `_snprintf` macro via wincompat.h
+				 *  (now e.g. MSVC 2015 in 32-bit builds) would not add the trailing NUL!
+				 */
+				bn[bn_len + 1] = '\0';
 			}
 		}
 	}

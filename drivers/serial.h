@@ -65,11 +65,11 @@ ssize_t ser_send_char(TYPE_FD_SER fd, unsigned char ch);
 
 /* send the results of the format string with d_usec delay after each char */
 ssize_t ser_send_pace(TYPE_FD_SER fd, useconds_t d_usec, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 3, 4)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 3, 4)));
 
 /* send the results of the format string with no delay */
 ssize_t ser_send(TYPE_FD_SER fd, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 
 /* send buflen bytes from buf with no delay */
 ssize_t ser_send_buf(TYPE_FD_SER fd, const void *buf, size_t buflen);
@@ -100,7 +100,7 @@ int ser_flush_io(TYPE_FD_SER fd);
 
 /* unified failure reporting: call these often */
 void ser_comm_fail(const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 1, 2)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 1, 2)));
 void ser_comm_good(void);
 
 #ifdef WIN32

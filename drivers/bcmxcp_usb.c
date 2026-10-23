@@ -41,7 +41,7 @@ usb_dev_handle *nutusb_open(const char *port);
 int nutusb_close(usb_dev_handle *dev_h, const char *port);
 /* unified failure reporting: call these often */
 void nutusb_comm_fail(const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 1, 2)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 1, 2)));
 void nutusb_comm_good(void);
 /* function pointer, set depending on which device is used */
 /* FIXME? Use usb_ctrl_* typedefs*/

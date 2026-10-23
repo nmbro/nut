@@ -864,7 +864,7 @@ static int forkexec_parent_analyze(DWORD res, const ups_t *ups)
 	} else {
 		DWORD	exit_code = 0;
 		GetExitCodeProcess( ups->ProcessInformation.hProcess, &exit_code );
-		upslogx(LOG_WARNING, "Driver failed to start (exit status=%d)", exit_code);
+		upslogx(LOG_WARNING, "Driver failed to start (exit status=%" PRIuDWORD ")", exit_code);
 		exec_error++;
 		return -2;
 	}
