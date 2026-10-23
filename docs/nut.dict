@@ -1,4 +1,4 @@
-personal_ws-1.1 en 3976 utf-8
+personal_ws-1.1 en 3978 utf-8
 AAC
 AAS
 ABI
@@ -566,6 +566,7 @@ Hurd
 Håvard
 IANA
 IC
+ICMP
 IDE
 IDEN
 IDEs
@@ -3247,6 +3248,7 @@ rb
 rbuf
 rc
 rcctl
+reachability
 readelf
 readline
 readonly

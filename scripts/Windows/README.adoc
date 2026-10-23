@@ -235,6 +235,24 @@ To see which DLLs a program needs, e.g. when checking a bundle for another
 Windows version, `dllldd.sh` in this directory lists them (also used by the
 bundle recipes), as does `objdump -p FILE | grep 'DLL Name'`.
 
+Running the bundle on Windows
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A few points which come up when configuring and running a bundle on a
+Windows host (rather than building it):
+
+* Use forward slashes in the NUT configuration files, e.g.
+  `CERTPATH C:/nut/etc/ca.pem`. The configuration parser treats a backslash
+  as an escape character, so a Windows path like `C:\nut\etc` would be
+  mangled (`\n` and friends).
+* `upsd` listens on TCP port 3493; the network clients (`upsc`, `upsmon`,
+  the CGI programs) connect to it there. Open that port in the Windows
+  firewall on the server for remote clients (and allow ICMP echo if you
+  check reachability with `ping`).
+* `NUT_CONFPATH` overrides the directory where the programs look for their
+  configuration files, e.g. to run a second `upsmon` with its own
+  `upsmon.conf` from another directory.
+
 Cross-building on Linux
 -----------------------
 
