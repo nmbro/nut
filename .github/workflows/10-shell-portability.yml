@@ -1,0 +1,118 @@
+# Check that the generated configure script and NUT's shell scripts work
+# the same with several autotools generations and /bin/sh implementations:
+# for each autotools set, autogen.sh, then `<shell> -n configure` and a real
+# configure run under dash, bash, ksh93, mksh, yash, posh, busybox sh and
+# zsh (as sh), with config.h and the Makefiles compared across shells.
+# In one set's tree also check-scripts-syntax, the generated scripts,
+# tests/nut-driver-enumerator-test.sh with every shell, and the shellcheck
+# target with GNU make and bmake.
+#
+# This covers what the Jenkins "shellcheck" quick tests check on one agent
+# per OS (a Debian/Ubuntu/CentOS/OpenBSD/... build agent for each), in a
+# few minutes on one GitHub-hosted runner. The autotools sets are built
+# from GNU release tarballs (signatures checked against the GNU keyring),
+# see .github/scripts/shell-matrix/build-autotools.sh for the versions.
+#
+# Runs on pull_request (not pull_request_target), so for PRs from forks it
+# has a read-only token. Built autotools sets are cached, and only master
+# branch pushes and scheduled runs save the cache.
+# Run .github/scripts/shell-matrix/*.sh locally for the same check.
+
+name: "GHA-10: Shell portability"
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    paths:
+      - 'configure.ac'
+      - 'autogen.sh'
+      - 'm4/**'
+      - '**/Makefile.am'
+      - '**/*.sh'
+      - '**/*.sh.in'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/scripts/shell-matrix/**'
+      - '.github/workflows/10-shell-portability.yml'
+  schedule:
+    - cron: '45 12 * * 0'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  shell-matrix:
+    name: "autotools ${{ matrix.set }}, all shells"
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # names of the sets in build-autotools.sh:
+        # c7 = autoconf 2.69 / automake 1.13 (CentOS 7),
+        # u18 = 2.69 / 1.15, u22 = 2.71 / 1.16, u26 = 2.72 / 1.18
+        set: [ c7, u18, u22, u26 ]
+
+    steps:
+    # Full history and tags: autogen.sh takes NUT's version from git
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Install shells and tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          dash bash ksh mksh yash posh busybox zsh bmake shellcheck \
+          file gpgv m4 perl pkgconf
+
+    - name: Restore autotools set
+      id: cache-autotools
+      uses: actions/cache/restore@v6
+      with:
+        path: /opt/at/${{ matrix.set }}
+        key: autotools-${{ runner.os }}-${{ env.ImageOS }}-${{ matrix.set }}-${{ hashFiles('.github/scripts/shell-matrix/build-autotools.sh') }}
+
+    - name: Build autotools set
+      if: ${{ steps.cache-autotools.outputs.cache-hit != 'true' }}
+      env:
+        AT_SET: ${{ matrix.set }}
+      run: |
+        AT_SRC="$RUNNER_TEMP/at-src" bash .github/scripts/shell-matrix/build-autotools.sh "$AT_SET"
+
+    - name: Save autotools set (master branch pushes and scheduled runs only)
+      if: ${{ steps.cache-autotools.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      uses: actions/cache/save@v6
+      with:
+        path: /opt/at/${{ matrix.set }}
+        key: ${{ steps.cache-autotools.outputs.cache-primary-key }}
+
+    # The newest set also runs the checks of a configured tree, so they
+    # still run when an older autoconf breaks configure
+    - name: Run shell portability checks
+      env:
+        AT_SET: ${{ matrix.set }}
+        WORKDIR: ${{ runner.temp }}/shell-matrix
+      run: |
+        bash .github/scripts/shell-matrix/nut-sh-matrix.sh -o u26 . HEAD "$AT_SET"
+
+    - name: Upload logs
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: shell-matrix-logs-${{ matrix.set }}
+        path: |
+          ${{ runner.temp }}/shell-matrix/*/*.log
+          ${{ runner.temp }}/shell-matrix/*/*.build-*/configure.log
+          ${{ runner.temp }}/shell-matrix/*/*.build-*/config.log
+          ${{ runner.temp }}/shell-matrix/*/*.build-*/diff.*
+        if-no-files-found: ignore
+        retention-days: 7
