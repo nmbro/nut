@@ -5,7 +5,10 @@
 # zsh (as sh), with config.h and the Makefiles compared across shells.
 # In one set's tree also check-scripts-syntax, the generated scripts,
 # tests/nut-driver-enumerator-test.sh with every shell, and the shellcheck
-# target with GNU make and bmake.
+# target with GNU make and bmake. Then NUT is configured, built and its
+# driver enumerator tested under six "personalities": PATH overlays with
+# FreeBSD, NetBSD (two bmake generations), OpenBSD (oksh + OpenBSD make)
+# and busybox userland, and dash with mawk.
 #
 # This covers what the Jenkins "shellcheck" quick tests check on one agent
 # per OS (a Debian/Ubuntu/CentOS/OpenBSD/... build agent for each), in a
@@ -14,7 +17,8 @@
 # see .github/scripts/shell-matrix/build-autotools.sh for the versions.
 #
 # Runs on pull_request (not pull_request_target), so for PRs from forks it
-# has a read-only token. Built autotools sets are cached, and only master
+# has a read-only token. Built autotools sets and BSD tools are cached
+# (BSD tools sources pinned by commit or sha256), and only master
 # branch pushes and scheduled runs save the cache.
 # Run .github/scripts/shell-matrix/*.sh locally for the same check.
 
@@ -114,5 +118,110 @@ jobs:
           ${{ runner.temp }}/shell-matrix/*/*.build-*/configure.log
           ${{ runner.temp }}/shell-matrix/*/*.build-*/config.log
           ${{ runner.temp }}/shell-matrix/*/*.build-*/diff.*
+        if-no-files-found: ignore
+        retention-days: 7
+
+  # BSD userland and makes for the personalities below, built once per run
+  # (or restored from the cache) and passed on as an artifact
+  bsd-tools:
+    name: "Build BSD tools"
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Restore BSD tools
+      id: cache-bsd-tools
+      uses: actions/cache/restore@v6
+      with:
+        path: /opt/bsd
+        key: bsd-tools-${{ runner.os }}-${{ env.ImageOS }}-${{ hashFiles('.github/scripts/shell-matrix/build-bsd-tools.sh') }}
+
+    - name: Build BSD tools
+      if: ${{ steps.cache-bsd-tools.outputs.cache-hit != 'true' }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          meson ninja-build flex byacc libedit-dev libbsd-dev libssl-dev \
+          libncurses-dev libacl1-dev musl-tools pkgconf
+        BSD_SRC="$RUNNER_TEMP/bsd-src" bash .github/scripts/shell-matrix/build-bsd-tools.sh
+
+    - name: Save BSD tools (master branch pushes and scheduled runs only)
+      if: ${{ steps.cache-bsd-tools.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      uses: actions/cache/save@v6
+      with:
+        path: /opt/bsd
+        key: ${{ steps.cache-bsd-tools.outputs.cache-primary-key }}
+
+    # a tarball keeps the symlinks and modes that the artifact zip loses
+    - name: Pack BSD tools
+      run: |
+        tar -C /opt -czf "$RUNNER_TEMP/bsd-tools.tar.gz" bsd
+
+    - name: Upload BSD tools
+      uses: actions/upload-artifact@v7
+      with:
+        name: bsd-tools
+        path: ${{ runner.temp }}/bsd-tools.tar.gz
+        retention-days: 1
+
+  personalities:
+    name: "userland ${{ matrix.personality }}"
+    needs: bsd-tools
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # see .github/scripts/shell-matrix/nut-personalities.sh
+        personality: [ freebsd, netbsd9, netbsd11, openbsd, busybox, mawk ]
+
+    steps:
+    # Full history and tags: autogen.sh takes NUT's version from git
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Install tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          autoconf automake libtool pkgconf dash busybox bmake original-awk mawk \
+          libedit2 libbsd0 python3-pyqt5 gettext
+
+    - name: Download BSD tools
+      uses: actions/download-artifact@v8
+      with:
+        name: bsd-tools
+        path: ${{ runner.temp }}
+
+    - name: Unpack BSD tools
+      run: |
+        sudo tar -C /opt -xzf "$RUNNER_TEMP/bsd-tools.tar.gz"
+
+    - name: Build and test under the personality
+      env:
+        PERSONALITY: ${{ matrix.personality }}
+        WORKDIR: ${{ runner.temp }}/shell-matrix
+        NUT_MONITOR: "yes"
+      run: |
+        bash .github/scripts/shell-matrix/nut-personalities.sh . HEAD "$PERSONALITY"
+
+    - name: Upload logs
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: personality-logs-${{ matrix.personality }}
+        path: |
+          ${{ runner.temp }}/shell-matrix/*/*.log
+          ${{ runner.temp }}/shell-matrix/*/*/config.log
         if-no-files-found: ignore
         retention-days: 7
