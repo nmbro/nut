@@ -1,26 +1,32 @@
 # Check that the generated configure script and NUT's shell scripts work
-# the same with several autotools generations and /bin/sh implementations:
-# for each autotools set, autogen.sh, then `<shell> -n configure` and a real
-# configure run under dash, bash, ksh93, mksh, yash, posh, busybox sh and
-# zsh (as sh), with config.h and the Makefiles compared across shells.
-# In one set's tree also check-scripts-syntax, the generated scripts,
-# tests/nut-driver-enumerator-test.sh with every shell, and the shellcheck
-# target with GNU make and bmake. Then NUT is configured, built and its
-# driver enumerator tested under six "personalities": PATH overlays with
-# FreeBSD, NetBSD (two bmake generations), OpenBSD (oksh + OpenBSD make)
-# and busybox userland, and dash with mawk.
+# the same with several autotools generations and /bin/sh implementations.
+# For each autotools set: autogen.sh, then `<shell> -n configure` and a
+# real configure run under dash, bash, ksh93, mksh, yash, posh, busybox sh
+# and zsh (as sh), with config.h and the Makefiles compared across shells.
+# In the newest set's tree also `<shell> -n` on the tracked and generated
+# scripts, tests/nut-driver-enumerator-test.sh with every shell, and
+# `make check-scripts-syntax` with GNU make and bmake. Then NUT is
+# configured, built and its driver enumerator tested under six
+# "personalities": PATH overlays with FreeBSD, NetBSD (two bmake
+# generations), OpenBSD (oksh + OpenBSD make) and busybox userland, and
+# dash with mawk.
 #
-# This covers what the Jenkins "shellcheck" quick tests check on one agent
-# per OS (a Debian/Ubuntu/CentOS/OpenBSD/... build agent for each), in a
-# few minutes on one GitHub-hosted runner. The autotools sets are built
-# from GNU release tarballs (signatures checked against the GNU keyring),
-# see .github/scripts/shell-matrix/build-autotools.sh for the versions.
+# The Jenkins "shellcheck" quick tests check the same things with one build
+# agent per OS (Debian, Ubuntu, CentOS, OpenBSD, ...); this takes a few
+# minutes on GitHub-hosted runners. Those tests run `make shellcheck`, which
+# is currently an alias of check-scripts-syntax (shell syntax checks). The
+# ShellCheck tool is a different check, run by "GHA-07: ShellCheck".
+#
+# Failures show as error annotations, on the source line where the output
+# names one, and in the job summary; the logs of a failed job are uploaded.
+# The autotools sets are built from GNU release tarballs (signatures checked
+# against the GNU keyring), the BSD tools from sources pinned by commit or
+# sha256; see .github/scripts/shell-matrix/build-*.sh for the versions.
 #
 # Runs on pull_request (not pull_request_target), so for PRs from forks it
-# has a read-only token. Built autotools sets and BSD tools are cached
-# (BSD tools sources pinned by commit or sha256), and only master
+# has a read-only token. The built tools are cached, and only master
 # branch pushes and scheduled runs save the cache.
-# Run .github/scripts/shell-matrix/*.sh locally for the same check.
+# Run .github/scripts/shell-matrix/*.sh locally for the same checks.
 
 name: "GHA-10: Shell portability"
 
@@ -75,7 +81,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
-          dash bash ksh mksh yash posh busybox zsh bmake shellcheck \
+          dash bash ksh mksh yash posh busybox zsh bmake \
           file gpgv m4 perl pkgconf
 
     - name: Restore autotools set

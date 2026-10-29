@@ -34,8 +34,9 @@
 #
 # Work trees and logs go to $WORKDIR/pers-<commit> (default $HOME/shm).
 # Exit code is 1 if any step failed. In GitHub Actions (GITHUB_ACTIONS=true)
-# failures are also printed as error annotations, and the results listed in
-# the job summary (GITHUB_STEP_SUMMARY).
+# failures are also printed as error annotations (OpenBSD make's dependency
+# cycles on the rule in Makefile.am) and written to the job summary; see
+# report.sh.
 
 set -uo pipefail
 
@@ -56,16 +57,25 @@ JOBS=$(nproc)
 CONFIG_OPTS=(--with-all=no --with-doc=no --with-libltdl=no --disable-silent-rules
              ${NUT_MONITOR:+--with-nut_monitor=$NUT_MONITOR})
 
-fail=0 STEP="" T0=0
-now() { date +%s%N; }
-elapsed() { local d=$(( ($(now) - T0) / 100000000 )); printf '%d.%d' $((d / 10)) $((d % 10)); }
-summary() { [ -z "${GITHUB_STEP_SUMMARY-}" ] || printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; }
-step() { STEP="$*"; printf '%-58s' "$STEP"; T0=$(now); }
-ok()   { local t; t=$(elapsed); printf 'ok   %5ss\n' "$t"; summary "| $STEP | ok | ${t}s |"; }
-bad()  {
-  local t; t=$(elapsed); printf 'FAIL %5ss  %s\n' "$t" "$*"; fail=1
-  summary "| $STEP | **FAIL**: $(printf '%s' "$*" | tr '|' '/') | ${t}s |"
-  [ "${GITHUB_ACTIONS-}" != true ] || printf '::error title=%s::%s\n' "$STEP" "$*"
+# shellcheck source-path=SCRIPTDIR source=report.sh
+. "$(dirname "$0")/report.sh"
+
+# annotate_cycles <build dir> <make log>: put each "Cycle found" of OpenBSD
+# make on the rule in the Makefile.am of the directory it happened in
+annotate_cycles() {
+  local b=$1 line tgt path dir rel am n
+  while IFS= read -r line; do
+    # "Cycle found: all-am -> <target> -> (<abs path> -> <abs path>)"
+    tgt=$(sed -n 's/^Cycle found: [^ ]* -> \([^ ]*\) -> .*/\1/p' <<<"$line")
+    path=$(sed -n 's/.* -> (\([^ ]*\) -> .*/\1/p' <<<"$line")
+    rel=${path#"$b"/}
+    [ -n "$tgt" ] && [ "$rel" != "$path" ] || continue
+    dir=${rel%/"$tgt"}
+    am=$dir/Makefile.am
+    [ -f "$WORK/src/$am" ] || continue
+    n=$(grep -n -m1 -F "$tgt:" "$WORK/src/$am" | cut -d: -f1)
+    annotate "$am" "${n:-1}" "OpenBSD make: ${line//"$b"\//}"
+  done < <(grep '^Cycle found' "$2" | sort -u)
 }
 
 mkpers() {  # mkpers <name>: (re)create its PATH dir
@@ -103,7 +113,7 @@ mkpers() {  # mkpers <name>: (re)create its PATH dir
   done
   # every link must point at an installed tool
   local l; for l in "$d"/*; do [ -e "$l" ] || { echo "missing tool for $1: $l -> $(readlink "$l")" >&2; return 1; }; done
-  # and the make and sh must actually run here
+  # and the make and sh must run on this machine
   printf 'all:\n\t@true\n' | "$d/make" -f - >/dev/null 2>&1 || { echo "$1: make does not run: $(readlink -f "$d/make")" >&2; return 1; }
   "$d/sh" -c true || { echo "$1: sh does not run: $(readlink -f "$d/sh")" >&2; return 1; }
 }
@@ -125,7 +135,7 @@ ver() {  # one-line identity of the personality's tools
     "$("$d/grep" --version 2>/dev/null | head -1 | cut -c1-40)"
 }
 
-summary "### Make and userland personalities: ${PERS[*]}" "" "| Check | Result | Time |" "|---|---|---|"
+report_init "Userland personality ${PERS[*]}"
 
 rm -rf "$WORK"; mkdir -p "$WORK"; git -C "$GITDIR" worktree prune
 T_START=$(date +%s)
@@ -134,7 +144,7 @@ T_START=$(date +%s)
 git -C "$GITDIR" worktree add -f -q --detach "$WORK/src" "$COMMIT"
 step "autogen ($(${AUTOTOOLS_BIN:+$AUTOTOOLS_BIN/}autoconf --version | sed -n '1s/.* //p'))"
 if (cd "$WORK/src" && PATH=${AUTOTOOLS_BIN:+$AUTOTOOLS_BIN:}$PATH ./autogen.sh) > "$WORK/autogen.log" 2>&1; then ok
-else bad "$(grep -m1 "^FAILED" "$WORK/autogen.log" || tail -1 "$WORK/autogen.log")"; exit 1; fi
+else bad "$(grep -m1 "^FAILED" "$WORK/autogen.log" || tail -1 "$WORK/autogen.log")"; detail "$(tail -20 "$WORK/autogen.log")"; exit 1; fi
 
 for p in "${PERS[@]}"; do
   step "[$p] tools"
@@ -149,16 +159,26 @@ for p in "${PERS[@]}"; do
   # AC_PROG_AWK etc. would otherwise go looking for gawk first
   if (cd "$B" && PATH=$PP CONFIG_SHELL=$PD/$p/bin/sh AWK=awk SED=sed GREP=grep EGREP="grep -E" \
         "$PD/$p/bin/sh" ./configure "${CONFIG_OPTS[@]}") > "$B.configure.log" 2>&1; then ok
-  else bad "$(tail -1 "$B.configure.log" | cut -c1-100)"; continue; fi
+  else
+    bad "$(tail -1 "$B.configure.log" | cut -c1-100)"
+    detail "$(tail -15 "$B.configure.log")"; continue
+  fi
 
   step "[$p] make -j$JOBS all"
   if (cd "$B" && PATH=$PP make -j"$JOBS" all) > "$B.make.log" 2>&1; then ok
-  else bad "$( (grep -m1 -E 'Cycle found|\*\*\* |Stop\.|: error:' "$B.make.log" || tail -1 "$B.make.log") | cut -c1-200)"; fi
+  else
+    bad "$( (grep -m1 -E 'Cycle found|\*\*\* |Stop\.|: error:' "$B.make.log" || tail -1 "$B.make.log") | sed "s|$B/||g" | cut -c1-200)"
+    annotate_cycles "$B" "$B.make.log"
+    detail "$(grep -E 'Cycle found|\*\*\* |Stop\.|: error:' "$B.make.log" | sed "s|$B/||g" | head -20)"
+  fi
 
   step "[$p] nut-driver-enumerator-test"
   if (cd "$B/tests" && PATH=$PP SERVICE_FRAMEWORK=selftest SHELL_PROGS=$PD/$p/bin/sh \
         NDE="$B/scripts/upsdrvsvcctl/nut-driver-enumerator.sh" ./nut-driver-enumerator-test.sh) > "$B.nde.log" 2>&1; then ok
-  else bad "$(sed -n 's/.*completed with \([0-9]* failed cases\).*/\1/p' "$B.nde.log")"; fi
+  else
+    bad "$(sed -n 's/.*completed with \([0-9]* failed cases\).*/\1/p' "$B.nde.log")"
+    detail "$(grep '^Testing' "$B.nde.log" | grep -v "STATUS_CODE='MATCHED'" | head -20)"
+  fi
 done
 
 echo "total $(( $(date +%s) - T_START ))s, $([ $fail = 0 ] && echo PASS || echo FAIL)"
