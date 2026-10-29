@@ -32,7 +32,7 @@ name: "GHA-10: Shell portability"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "shell-matrix-test-*" ]
   pull_request:
     paths:
       - 'configure.ac'
