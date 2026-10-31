@@ -68,6 +68,10 @@ jobs:
                 "developer/clang-$CLANGVER" ; do
               pkg install -q "$p" || echo "pkg install $p: exit $?"
             done
+            # Build as an unprivileged user, like the farm's abuild: as root,
+            # NIT's upsd drops privileges and then can't open its NSS DB
+            # ("Can not initialize SSL context").
+            useradd -m -d /export/home/abuild -s /bin/bash abuild
             echo "prepare took $(( $(date +%s) - t0 )) s"
           run: |
             set -e
@@ -75,18 +79,25 @@ jobs:
             CC=clang-$CLANGVER; command -v "$CC" >/dev/null || CC=clang
             CXX=clang++-$CLANGVER; command -v "$CXX" >/dev/null || CXX=clang++
             command -v "$CC" >/dev/null || { echo "no $CC in PATH"; exit 1; }
-            export CC CXX
             echo "CC=$(command -v $CC) CXX=$(command -v $CXX)"; $CC --version | head -1
             # the cache travels in the workspace; compilers are reinstalled
             # in every fresh VM, so compare them by content, not mtime
-            mkdir -p "$PWD/.ccache"
-            rm -rf "$HOME/.ccache"; ln -s "$PWD/.ccache" "$HOME/.ccache"
-            printf 'compiler_check = content\nmax_size = 2G\n' > "$PWD/.ccache/ccache.conf"
-            ccache -z >/dev/null
-            t0=$(date +%s)
-            ./ci_build.sh
-            echo "ci_build.sh took $(( $(date +%s) - t0 )) s"
-            ccache -s
+            mkdir -p .ccache
+            printf 'compiler_check = content\nmax_size = 2G\n' > .ccache/ccache.conf
+            chown -R abuild "$PWD"
+            { echo "set -e; cd '$PWD'"
+              echo "rm -rf \"\$HOME/.ccache\"; ln -s '$PWD/.ccache' \"\$HOME/.ccache\""
+              echo "export PATH='$PATH' CC='$CC' CXX='$CXX'"
+              for v in LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx \
+                  CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT ; do
+                eval "echo \"export $v='\$$v'\""
+              done
+              echo 'ccache -z >/dev/null; t0=$(date +%s)'
+              echo './ci_build.sh || rc=$?'
+              echo 'echo "ci_build.sh took $(( $(date +%s) - t0 )) s"; ccache -s; exit ${rc:-0}'
+            } > /tmp/cell.sh
+            cat /tmp/cell.sh
+            su - abuild -c "bash /tmp/cell.sh"
         env:
           CLANGVER: "${{ matrix.clang }}"
           LANG: C
