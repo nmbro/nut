@@ -1,0 +1,78 @@
+# Experiment, not for upstream: how long does one NUT CI farm OmniOS
+# slow-build cell take in an OmniOS VM on a GitHub-hosted runner?
+# The cell mirrors the farm's
+#   gnu99-gnu++11-clang-NN-omnios-amd64-64bit-nowarn
+# from "Various GNU C99+/C++98+ standard out-of-tree builds with fatal
+# warnings (auto level) and non-GCC toolkits" (BUILD_TYPE=default-all-errors).
+name: "99: OmniOS VM experiment"
+
+on:
+  push:
+    branches: [exp-omnios-vm]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cell:
+    name: "OmniOS ${{ matrix.release }}, gnu99/gnu++11, newest clang"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [r151054, r151058]
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Build and test in the VM
+        uses: vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42 # v1.3.7
+        with:
+          release: "${{ matrix.release }}-build"
+          cpu: 4
+          mem: 12288
+          envs: "LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT"
+          prepare: |
+            set -e
+            t0=$(date +%s)
+            uname -a; cat /etc/release | head -1
+            for p in developer/build/autoconf developer/build/automake \
+                developer/build/libtool library/libtool/libltdl \
+                ccache git developer/pkg-config runtime/perl \
+                libusb-1 net-snmp openssl-3 libgd \
+                system/library/mozilla-nss system/library/mozilla-nss/header-nss \
+                library/nspr library/nspr/header-nspr ; do
+              pkg install -q "$p" || echo "pkg install $p: exit $?"
+            done
+            V=$(pkg list -aH 'developer/clang-*' 2>/dev/null \
+                | sed -n 's,^developer/clang-\([0-9][0-9]*\) .*,\1,p' | sort -n | tail -1)
+            echo "newest clang in the repos: $V"
+            pkg install -q "developer/clang-$V" || echo "pkg install clang-$V: exit $?"
+            echo "$V" > /tmp/clangver
+            echo "prepare took $(( $(date +%s) - t0 )) s"
+          run: |
+            set -e
+            V=$(cat /tmp/clangver)
+            PATH="/opt/ooce/bin:/opt/ooce/clang-$V/bin:$PATH"; export PATH
+            CC=clang-$V; command -v "$CC" >/dev/null || CC=clang
+            CXX=clang++-$V; command -v "$CXX" >/dev/null || CXX=clang++
+            export CC CXX
+            echo "CC=$(command -v $CC) CXX=$(command -v $CXX)"; $CC --version | head -1
+            t0=$(date +%s)
+            ./ci_build.sh
+            echo "ci_build.sh took $(( $(date +%s) - t0 )) s"
+        env:
+          LANG: C
+          LC_ALL: C
+          TZ: UTC
+          BITS: "64"
+          CSTDVARIANT: gnu
+          CSTDVERSION_c: "99"
+          CSTDVERSION_cxx: "11"
+          CI_BUILDDIR: obj
+          BUILD_TYPE: default-all-errors
+          BUILD_WARNFATAL: "yes"
+          BUILD_WARNOPT: auto
