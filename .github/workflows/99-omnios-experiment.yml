@@ -24,7 +24,7 @@ jobs:
       matrix:
         release: [r151054, r151058]
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
 
@@ -47,18 +47,23 @@ jobs:
                 library/nspr library/nspr/header-nspr ; do
               pkg install -q "$p" || echo "pkg install $p: exit $?"
             done
-            V=$(pkg list -aH 'developer/clang-*' 2>/dev/null \
-                | sed -n 's,^developer/clang-\([0-9][0-9]*\) .*,\1,p' | sort -n | tail -1)
+            pkg list -aH '*clang*' 2>&1 | head -40
+            V=$(pkg list -aH '*clang*' 2>/dev/null | awk '{print $1}' \
+                | sed -n 's,.*/clang-\([0-9][0-9]*\)$,\1,p' | sort -n | tail -1)
             echo "newest clang in the repos: $V"
+            test -n "$V"
             pkg install -q "developer/clang-$V" || echo "pkg install clang-$V: exit $?"
+            ls /opt/ooce/bin/ | grep -i clang || true
+            ls -d /opt/ooce/clang* /opt/ooce/llvm* 2>/dev/null || true
             echo "$V" > /tmp/clangver
             echo "prepare took $(( $(date +%s) - t0 )) s"
           run: |
             set -e
             V=$(cat /tmp/clangver)
-            PATH="/opt/ooce/bin:/opt/ooce/clang-$V/bin:$PATH"; export PATH
+            PATH="/opt/ooce/bin:/opt/ooce/clang-$V/bin:/opt/ooce/llvm-$V/bin:$PATH"; export PATH
             CC=clang-$V; command -v "$CC" >/dev/null || CC=clang
             CXX=clang++-$V; command -v "$CXX" >/dev/null || CXX=clang++
+            command -v "$CC" >/dev/null || { echo "no $CC in PATH"; exit 1; }
             export CC CXX
             echo "CC=$(command -v $CC) CXX=$(command -v $CXX)"; $CC --version | head -1
             t0=$(date +%s)
