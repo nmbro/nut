@@ -3,7 +3,14 @@
 # The cell mirrors the farm's
 #   gnu99-gnu++11-clang-NN-omnios-amd64-64bit-nowarn
 # from "Various GNU C99+/C++98+ standard out-of-tree builds with fatal
-# warnings (auto level) and non-GCC toolkits" (BUILD_TYPE=default-all-errors).
+# warnings (auto level) and non-GCC toolkits" (BUILD_TYPE=default-all-errors),
+# with clang 20 on r151054 LTS and clang 22 on r151058, both farm versions.
+#
+# ccache: ci_build.sh always uses $HOME/.ccache, so inside the VM that is a
+# link into the workspace, which the action copies back to the runner; the
+# runner caches it between runs. One cache per release + clang version (ccache
+# hashes the flags itself, so the C-standard cells could share it); each run
+# saves under its own key, the next restores the newest by prefix.
 name: "99: OmniOS VM experiment"
 
 on:
@@ -16,17 +23,30 @@ permissions:
 
 jobs:
   cell:
-    name: "OmniOS ${{ matrix.release }}, gnu99/gnu++11, newest clang"
+    name: "OmniOS ${{ matrix.release }}, clang ${{ matrix.clang }}, gnu99/gnu++11"
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        release: [r151054, r151058]
+        include:
+          - release: r151054
+            clang: "20"
+          - release: r151058
+            clang: "22"
+    env:
+      CCACHE_KEY: "ccache-omnios-${{ matrix.release }}-clang${{ matrix.clang }}-amd64"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          restore-keys: "${{ env.CCACHE_KEY }}-"
 
       - name: Build and test in the VM
         uses: vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42 # v1.3.7
@@ -34,42 +54,41 @@ jobs:
           release: "${{ matrix.release }}-build"
           cpu: 4
           mem: 12288
-          envs: "LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT"
+          envs: "CLANGVER LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT"
           prepare: |
             set -e
             t0=$(date +%s)
-            uname -a; cat /etc/release | head -1
+            uname -a; head -1 /etc/release
             for p in developer/build/autoconf developer/build/automake \
                 developer/build/libtool library/libtool/libltdl \
                 ccache git developer/pkg-config runtime/perl \
                 libusb-1 net-snmp openssl-3 libgd \
                 system/library/mozilla-nss system/library/mozilla-nss/header-nss \
-                library/nspr library/nspr/header-nspr ; do
+                library/nspr library/nspr/header-nspr \
+                "developer/clang-$CLANGVER" ; do
               pkg install -q "$p" || echo "pkg install $p: exit $?"
             done
-            pkg list -aH '*clang*' 2>&1 | head -40
-            V=$(pkg list -aH '*clang*' 2>/dev/null | awk '{print $1}' \
-                | sed -n 's,.*/clang-\([0-9][0-9]*\)$,\1,p' | sort -n | tail -1)
-            echo "newest clang in the repos: $V"
-            test -n "$V"
-            pkg install -q "developer/clang-$V" || echo "pkg install clang-$V: exit $?"
-            ls /opt/ooce/bin/ | grep -i clang || true
-            ls -d /opt/ooce/clang* /opt/ooce/llvm* 2>/dev/null || true
-            echo "$V" > /tmp/clangver
             echo "prepare took $(( $(date +%s) - t0 )) s"
           run: |
             set -e
-            V=$(cat /tmp/clangver)
-            PATH="/opt/ooce/bin:/opt/ooce/clang-$V/bin:/opt/ooce/llvm-$V/bin:$PATH"; export PATH
-            CC=clang-$V; command -v "$CC" >/dev/null || CC=clang
-            CXX=clang++-$V; command -v "$CXX" >/dev/null || CXX=clang++
+            PATH="/opt/ooce/bin:/opt/ooce/clang-$CLANGVER/bin:/opt/ooce/llvm-$CLANGVER/bin:$PATH"; export PATH
+            CC=clang-$CLANGVER; command -v "$CC" >/dev/null || CC=clang
+            CXX=clang++-$CLANGVER; command -v "$CXX" >/dev/null || CXX=clang++
             command -v "$CC" >/dev/null || { echo "no $CC in PATH"; exit 1; }
             export CC CXX
             echo "CC=$(command -v $CC) CXX=$(command -v $CXX)"; $CC --version | head -1
+            # the cache travels in the workspace; compilers are reinstalled
+            # in every fresh VM, so compare them by content, not mtime
+            mkdir -p "$PWD/.ccache"
+            rm -rf "$HOME/.ccache"; ln -s "$PWD/.ccache" "$HOME/.ccache"
+            printf 'compiler_check = content\nmax_size = 2G\n' > "$PWD/.ccache/ccache.conf"
+            ccache -z >/dev/null
             t0=$(date +%s)
             ./ci_build.sh
             echo "ci_build.sh took $(( $(date +%s) - t0 )) s"
+            ccache -s
         env:
+          CLANGVER: "${{ matrix.clang }}"
           LANG: C
           LC_ALL: C
           TZ: UTC
@@ -81,3 +100,10 @@ jobs:
           BUILD_TYPE: default-all-errors
           BUILD_WARNFATAL: "yes"
           BUILD_WARNOPT: auto
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}"
