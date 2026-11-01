@@ -27,8 +27,8 @@ env:
   IMAGE: ghcr.io/nmbro/nut-ci-omnios
   # nmbro/nut-ci-omnios at the commit that built the images: its boot.sh,
   # and the identity the attestations must name
-  IMAGE_TOOLS_REF: 95ae0e60d2d19629e79a4e5952129c94fc93c08a
-  DIGEST: sha256:9e915f61c5d349c2bee58ab22d903a9e523f26d6d53440df77d4a368985815ea
+  IMAGE_TOOLS_REF: cd9a967b952ad7258ed7d4bc7de71772e9ac162d
+  DIGEST: sha256:7928c5f67144af48510d2f857dbd2be0332ec7ef679b44a77a32f7bdc3b9c90d
   CLANGVER: "22"
   VM_MEM: "12288"
   LANG: C
@@ -51,8 +51,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [control, tuned, unsafe, unsafe-zfs]
-        rep: [1, 2, 3]
+        variant: [control]
+        rep: [1]
     env:
       CCACHE_KEY: "ccache-omnios-r151058-clang22-amd64"
     steps:
