@@ -26,17 +26,18 @@ env:
 
 jobs:
   cell:
-    name: "OmniOS r151058, clang ${{ matrix.clang }}, gnu99/gnu++11"
+    name: "OmniOS r151058, clang ${{ matrix.clang }}, ${{ matrix.mem }} MB, ${{ matrix.disk }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    # Timing run: VM memory x compressed chain vs flattened uncompressed disk,
+    # all four at once so they share the time of day
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - clang: "20"
-            digest: sha256:4c6d2ae16066685b50e6748a1eaa3f83a5b51a1a9617f6823e2425ea22287aae
-          - clang: "22"
-            digest: sha256:9e915f61c5d349c2bee58ab22d903a9e523f26d6d53440df77d4a368985815ea
+        clang: ["22"]
+        digest: [sha256:9e915f61c5d349c2bee58ab22d903a9e523f26d6d53440df77d4a368985815ea]
+        mem: ["8192", "12288"]
+        disk: [chain, flat]
     env:
       CCACHE_KEY: "ccache-omnios-r151058-clang${{ matrix.clang }}-amd64"
     steps:
@@ -90,10 +91,20 @@ jobs:
       - name: Boot the VM
         env:
           CLANG: ${{ matrix.clang }}
+          DISK: ${{ matrix.disk }}
+          VM_MEM: ${{ matrix.mem }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/img"
-          qemu-img create -q -f qcow2 -F qcow2 -b "clang-$CLANG.c.qcow2" job.qcow2 40G
+          top="clang-$CLANG.c.qcow2"
+          if [ "$DISK" = flat ]; then
+            t0=$(date +%s)
+            qemu-img convert -O qcow2 "$top" flat.qcow2
+            echo "flatten took $(( $(date +%s) - t0 )) s"
+            ls -l flat.qcow2; df -h .
+            top=flat.qcow2
+          fi
+          qemu-img create -q -f qcow2 -F qcow2 -b "$top" job.qcow2 40G
           t0=$(date +%s)
           bash "$GITHUB_WORKSPACE/.image-tools/image/boot.sh" "$RUNNER_TEMP/img/job.qcow2" "$RUNNER_TEMP/img"
           echo "boot took $(( $(date +%s) - t0 )) s"
