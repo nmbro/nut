@@ -35,7 +35,9 @@ jobs:
           ../configure -q CC=clang CXX=clang++ --with-nss --with-openssl=no --with-python3 --with-dev >configure.log 2>&1 \
             || { tail -40 configure.log; exit 1; }
           make -s -j4 >make.log 2>&1 || { tail -40 make.log; exit 1; }
-          rc=0; make check-NIT > nit.log 2>&1 || rc=$?
+          # top-level "make check-NIT" fails with OpenBSD make at its NIT.env
+          # rule; ci_build.sh's "make check" reaches it from tests/NIT
+          rc=0; (cd tests/NIT && make check-NIT) > nit.log 2>&1 || rc=$?
           echo "check-NIT rc=$rc"; grep -E "OVERALL|\] Error" nit.log | tail -8
           [ "$rc" = 0 ] || tail -60 nit.log
           set +e
