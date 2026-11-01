@@ -65,6 +65,11 @@ jobs:
             echo 'rm -rf "$HOME/.ccache"; ln -s "$W/.ccache" "$HOME/.ccache"'
             echo 'PATH=/usr/local/lib/ccache:/usr/local/bin:/usr/pkg/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/pkg/sbin:/usr/local/sbin; export PATH'
             echo 'CC=clang CXX=clang++ CI_CCACHE_SYMLINKDIR=/usr/local/lib/ccache; export CC CXX CI_CCACHE_SYMLINKDIR'
+            # ci_build.sh runs default-all-errors as "-quick" (variants mixed
+            # into the fewest builds) when NODE_LABELS is set, as on every
+            # Jenkins agent, and as "-exhaustive" (one build per variant)
+            # otherwise; match the farm
+            echo 'NODE_LABELS=github-actions; export NODE_LABELS'
             for kv in LANG=C LC_ALL=C TZ=UTC BITS=64 CSTDVARIANT=gnu CSTDVERSION_c=99 CSTDVERSION_cxx=11 \
                 CI_BUILDDIR=obj BUILD_TYPE=default-all-errors BUILD_WARNFATAL=yes BUILD_WARNOPT=auto; do
               echo "$kv; export ${kv%%=*}"

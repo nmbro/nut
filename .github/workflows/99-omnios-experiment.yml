@@ -5,14 +5,10 @@
 # in an OmniOS VM on a GitHub-hosted runner, booted from the attested
 # nmbro/nut-ci-omnios image chain.
 #
-# Timing run, clang 22 on r151058, three runners per variant:
-#   control:     nut-ci-omnios's boot.sh as is
-#   tuned:       .github/exp/boot.sh (the candidate: anyvm's machine/CPU
-#                options, explicit topology, iothread, io_uring), writeback
-#   unsafe:      the same with VM_DISK_CACHE=unsafe
-#   unsafe-zfs:  that, plus sync=disabled and atime=off on the build dataset
-# All with 4 CPUs and 12 GB, and the same ccache. Compare within one runner
-# CPU model only.
+# clang 20 and 22 on r151058, 4 CPUs and 12 GB. NODE_LABELS is set as on
+# every Jenkins agent, so ci_build.sh runs default-all-errors as "-quick"
+# (variants mixed into the fewest builds), like the farm; without it, it
+# runs "-exhaustive" (one build per variant).
 name: "99: OmniOS VM experiment"
 
 on:
@@ -29,9 +25,8 @@ env:
   # nmbro/nut-ci-omnios at the commit that built the images: its boot.sh,
   # and the identity the attestations must name
   IMAGE_TOOLS_REF: cd9a967b952ad7258ed7d4bc7de71772e9ac162d
-  DIGEST: sha256:7928c5f67144af48510d2f857dbd2be0332ec7ef679b44a77a32f7bdc3b9c90d
-  CLANGVER: "22"
   VM_MEM: "12288"
+  NODE_LABELS: github-actions
   LANG: C
   LC_ALL: C
   TZ: UTC
@@ -46,16 +41,21 @@ env:
 
 jobs:
   cell:
-    name: "clang 22, ${{ matrix.variant }} #${{ matrix.rep }}"
+    name: "OmniOS r151058, clang ${{ matrix.clang }}, gnu99/gnu++11"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        variant: [control]
-        rep: [1]
+        include:
+          - clang: "20"
+            digest: sha256:2f487f0e192eed90d059d8466447fd28b4a481cbc85afca417b1961417db30dd
+          - clang: "22"
+            digest: sha256:7928c5f67144af48510d2f857dbd2be0332ec7ef679b44a77a32f7bdc3b9c90d
     env:
-      CCACHE_KEY: "ccache-omnios-r151058-clang22-amd64"
+      CLANGVER: ${{ matrix.clang }}
+      DIGEST: ${{ matrix.digest }}
+      CCACHE_KEY: "ccache-omnios-r151058-clang${{ matrix.clang }}-amd64"
     steps:
       - name: Runner hardware
         run: |
@@ -142,7 +142,7 @@ jobs:
             echo "rm -rf \$HOME/.ccache; ln -s $W/.ccache \$HOME/.ccache"
             echo "export PATH=/opt/ooce/bin:/opt/ooce/llvm-$CLANGVER/bin:\$PATH CC=clang-$CLANGVER CXX=clang++-$CLANGVER"
             for v in LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx \
-                CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT; do
+                CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT NODE_LABELS; do
               printf 'export %s=%q\n' "$v" "${!v}"
             done
             echo 'clang-'"$CLANGVER"' --version | head -1; ccache -z >/dev/null; t0=$(date +%s)'
