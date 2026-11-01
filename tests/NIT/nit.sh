@@ -1824,9 +1824,15 @@ EOF
                         check_NIT_certs_NSS "Server" "${TESTCERT_PATH_SERVER}"
                         ;;
                     OpenSSL)
-                        # Create a server certificate request:
+                        # Create a server certificate request; our own
+                        # minimal config, as "openssl req" needs one and some
+                        # systems ship none (seen on NetBSD 11.0). It has no
+                        # "prompt = no": with that, LibreSSL rejects the empty
+                        # "dn" section even though "-subj" gives the name.
+                        printf '[ req ]\ndistinguished_name = dn\n\n[ dn ]\n' > server.req.conf
                         MSYS_NO_PATHCONV=1 \
                         openssl req -new -nodes -out server.req \
+                            -config server.req.conf \
                             -newkey rsa:4096 -passout file:.pwfile \
                             -keyout server.key \
                             -subj "/CN=${TESTCERT_SERVER_NAME}/OU=Test/O=NIT/ST=StateOfChaos/C=US" \
@@ -2098,8 +2104,11 @@ EOF
                         ;;
                     OpenSSL)
                         # Create a client certificate request:
+                        # Own minimal config, as for the server request above
+                        printf '[ req ]\ndistinguished_name = dn\n\n[ dn ]\n' > client.req.conf
                         MSYS_NO_PATHCONV=1 \
                         openssl req -new -nodes \
+                            -config client.req.conf \
                             -out client.req -newkey rsa:4096 \
                             -passout file:.pwfile \
                             -keyout client.key \
