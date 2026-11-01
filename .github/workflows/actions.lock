@@ -24,7 +24,6 @@ workflows:
         - 'actions/setup-python@v7'
         - 'pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33'
     '.github/workflows/97-openbsd-ssl-diag.yml':
-        - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3'
     '.github/workflows/98-bsd-experiment.yml':
         - 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
