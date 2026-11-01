@@ -1,12 +1,12 @@
-# Experiment, not for upstream: which root CA extension layout do LibreSSL
-# and OpenSSL both accept for NIT's self-signed test CA? See
-# .github/exp/ca-experiment.sh.
-name: "97: OpenBSD NIT SSL diagnostics"
+# Experiment, not for upstream: does "openssl req" with a minimal -config
+# work with LibreSSL (OpenBSD 8.0) and NetBSD 11.0's OpenSSL, including
+# without a system openssl.cnf? See .github/exp/req-config.sh.
+name: "97: BSD NIT SSL diagnostics"
 
 on:
   push:
     branches: [exp-omnios-vm]
-    paths: [.github/workflows/97-openbsd-ssl-diag.yml, .github/exp/ca-experiment.sh]
+    paths: [.github/workflows/97-openbsd-ssl-diag.yml, .github/exp/req-config.sh]
   workflow_dispatch:
 
 permissions:
@@ -14,15 +14,21 @@ permissions:
 
 jobs:
   diag:
+    name: "${{ matrix.os }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [openbsd, netbsd]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: .github/exp
 
-      - name: OpenBSD
+      - name: OpenBSD 8.0
+        if: matrix.os == 'openbsd'
         uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
         with:
           release: "8.0"
@@ -30,4 +36,15 @@ jobs:
           mem: 4096
           usesh: true
           copyback: false
-          run: sh .github/exp/ca-experiment.sh
+          run: sh .github/exp/req-config.sh
+
+      - name: NetBSD 11.0
+        if: matrix.os == 'netbsd'
+        uses: vmactions/netbsd-vm@c8a0d7ddb84619a7a8cc4e652efa7950b3fd9f92 # v1.5.2
+        with:
+          release: "11.0"
+          cpu: 2
+          mem: 4096
+          usesh: true
+          copyback: false
+          run: ls -l /etc/openssl/ || true; sh .github/exp/req-config.sh
