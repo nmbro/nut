@@ -1,12 +1,12 @@
-# Experiment, not for upstream: which SubjectAltName entries make LibreSSL's
-# verifier reject a server certificate NIT generates? NIT puts the loopback
-# addresses in as DNS names too ("dns:127.0.0.1,dns:::1"), for older Python.
+# Experiment, not for upstream: which root CA extension layout do LibreSSL
+# and OpenSSL both accept for NIT's self-signed test CA? See
+# .github/exp/ca-experiment.sh.
 name: "97: OpenBSD NIT SSL diagnostics"
 
 on:
   push:
     branches: [exp-omnios-vm]
-    paths: [.github/workflows/97-openbsd-ssl-diag.yml]
+    paths: [.github/workflows/97-openbsd-ssl-diag.yml, .github/exp/ca-experiment.sh]
   workflow_dispatch:
 
 permissions:
@@ -17,36 +17,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Write the certificate experiment
-        run: |
-          cat > san.sh <<'EOF'
-          set -e
-          openssl version
-          d=$(mktemp -d); cd "$d"
-          openssl req -x509 -new -nodes -newkey rsa:2048 -keyout ca.key -out ca.pem -days 2 \
-            -subj "/CN=Test CA" -addext "basicConstraints=critical,CA:TRUE" \
-            -addext "keyUsage=critical,keyCertSign,cRLSign"
-          try() { # try <name> <subjectAltName>
-            openssl req -new -nodes -newkey rsa:2048 -keyout "$1.key" -out "$1.csr" -subj "/CN=NIT data server" 2>/dev/null
-            printf 'basicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\nsubjectAltName=%s\n' "$2" > "$1.ext"
-            if ! openssl x509 -req -in "$1.csr" -CA ca.pem -CAkey ca.key -CAcreateserial -days 2 \
-                 -extfile "$1.ext" -out "$1.pem" 2>"$1.err"; then
-              echo "$1: could not sign: $(tr '\n' ' ' < "$1.err")"; return
-            fi
-            printf '%s: %s\n    ' "$1" "$2"
-            openssl verify -CAfile ca.pem "$1.pem" 2>&1 | tail -1
-            python3 - "$1.pem" <<'PY'
-          import ssl, sys
-          print("    python decodes SAN:", ssl._ssl._test_decode_cert(sys.argv[1]).get("subjectAltName"))
-          PY
-          }
-          try nit     "DNS:localhost,DNS:localhost6,DNS:127.0.0.1,DNS:::1,IP:127.0.0.1,IP:::1"
-          try no-dns6 "DNS:localhost,DNS:localhost6,DNS:127.0.0.1,IP:127.0.0.1,IP:::1"
-          try no-dnsip "DNS:localhost,DNS:localhost6,IP:127.0.0.1,IP:::1"
-          try only-dns6 "DNS:localhost,DNS:::1"
-          try only-dns4 "DNS:localhost,DNS:127.0.0.1"
-          EOF
-          cat san.sh
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/exp
 
       - name: OpenBSD
         uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
@@ -56,4 +30,4 @@ jobs:
           mem: 4096
           usesh: true
           copyback: false
-          run: sh san.sh
+          run: sh .github/exp/ca-experiment.sh
