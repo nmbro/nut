@@ -37,6 +37,8 @@ jobs:
           make -s -j4 >make.log 2>&1 || { tail -40 make.log; exit 1; }
           rc=0; make check-NIT > nit.log 2>&1 || rc=$?
           echo "check-NIT rc=$rc"; grep -E "OVERALL|\] Error" nit.log | tail -8
+          [ "$rc" = 0 ] || tail -60 nit.log
+          set +e
           C=tests/NIT/tmp/etc/cert
           echo "=== files"; ls -lR "$C"
           CA=$C/rootca/rootca.pem
