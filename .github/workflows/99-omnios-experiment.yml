@@ -1,16 +1,13 @@
-# Experiment, not for upstream: how long does one NUT CI farm OmniOS
-# slow-build cell take in an OmniOS VM on a GitHub-hosted runner?
-# The cell mirrors the farm's
+# Experiment, not for upstream: one NUT CI farm OmniOS slow-build cell,
 #   gnu99-gnu++11-clang-NN-omnios-amd64-64bit-nowarn
 # from "Various GNU C99+/C++98+ standard out-of-tree builds with fatal
 # warnings (auto level) and non-GCC toolkits" (BUILD_TYPE=default-all-errors),
-# with clang 20 on r151054 LTS and clang 22 on r151058, both farm versions.
+# in an OmniOS VM on a GitHub-hosted runner, booted from the attested
+# nmbro/nut-ci-omnios image chain (pulled by digest, verified before boot).
 #
-# ccache: ci_build.sh always uses $HOME/.ccache, so inside the VM that is a
-# link into the workspace, which the action copies back to the runner; the
-# runner caches it between runs. One cache per release + clang version (ccache
-# hashes the flags itself, so the C-standard cells could share it); each run
-# saves under its own key, the next restores the newest by prefix.
+# ccache: ci_build.sh always uses $HOME/.ccache, so in the VM that is a link
+# into the workspace, which is synced back; the runner caches it per
+# release + compiler, each run under its own key.
 name: "99: OmniOS VM experiment"
 
 on:
@@ -21,25 +18,67 @@ on:
 permissions:
   contents: read
 
+env:
+  IMAGE: ghcr.io/nmbro/nut-ci-omnios
+  # nmbro/nut-ci-omnios at the commit that built the images: its boot.sh,
+  # and the identity the attestations must name
+  IMAGE_TOOLS_REF: 95ae0e60d2d19629e79a4e5952129c94fc93c08a
+
 jobs:
   cell:
-    name: "OmniOS ${{ matrix.release }}, clang ${{ matrix.clang }}, gnu99/gnu++11"
+    name: "OmniOS r151058, clang ${{ matrix.clang }}, gnu99/gnu++11"
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          - release: r151054
-            clang: "20"
-          - release: r151058
-            clang: "22"
+          - clang: "20"
+            digest: sha256:4c6d2ae16066685b50e6748a1eaa3f83a5b51a1a9617f6823e2425ea22287aae
+          - clang: "22"
+            digest: sha256:9e915f61c5d349c2bee58ab22d903a9e523f26d6d53440df77d4a368985815ea
     env:
-      CCACHE_KEY: "ccache-omnios-${{ matrix.release }}-clang${{ matrix.clang }}-amd64"
+      CCACHE_KEY: "ccache-omnios-r151058-clang${{ matrix.clang }}-amd64"
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nmbro/nut-ci-omnios
+          ref: ${{ env.IMAGE_TOOLS_REF }}
+          path: .image-tools
+          persist-credentials: false
+
+      - name: Install QEMU and cloud-localds, open /dev/kvm
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+
+      - uses: oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63 # v2.0.3
+        with:
+          version: 1.3.6
+
+      - name: Verify the image's provenance, then pull it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ matrix.digest }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://$IMAGE@$DIGEST" \
+            --repo nmbro/nut-ci-omnios \
+            --signer-workflow nmbro/nut-ci-omnios/.github/workflows/build.yml \
+            --source-ref refs/heads/main \
+            --source-digest "$IMAGE_TOOLS_REF" \
+            --deny-self-hosted-runners
+          t0=$(date +%s)
+          oras pull "$IMAGE@$DIGEST" -o "$RUNNER_TEMP/img"
+          echo "pull took $(( $(date +%s) - t0 )) s"
+          ls -l "$RUNNER_TEMP/img"
 
       - name: Restore ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -48,58 +87,20 @@ jobs:
           key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}"
           restore-keys: "${{ env.CCACHE_KEY }}-"
 
-      - name: Build and test in the VM
-        uses: vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42 # v1.3.7
-        with:
-          release: "${{ matrix.release }}-build"
-          cpu: 4
-          mem: 12288
-          envs: "CLANGVER LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT"
-          prepare: |
-            set -e
-            t0=$(date +%s)
-            uname -a; head -1 /etc/release
-            for p in developer/build/autoconf developer/build/automake \
-                developer/build/libtool library/libtool/libltdl \
-                ccache git developer/pkg-config runtime/perl \
-                libusb-1 net-snmp openssl-3 libgd \
-                system/library/mozilla-nss system/library/mozilla-nss/header-nss \
-                library/nspr library/nspr/header-nspr \
-                "developer/clang-$CLANGVER" ; do
-              pkg install -q "$p" || echo "pkg install $p: exit $?"
-            done
-            # Build as an unprivileged user, like the farm's abuild: as root,
-            # NIT's upsd drops privileges and then can't open its NSS DB
-            # ("Can not initialize SSL context").
-            useradd -m -d /export/home/abuild -s /bin/bash abuild
-            echo "prepare took $(( $(date +%s) - t0 )) s"
-          run: |
-            set -e
-            PATH="/opt/ooce/bin:/opt/ooce/clang-$CLANGVER/bin:/opt/ooce/llvm-$CLANGVER/bin:$PATH"; export PATH
-            CC=clang-$CLANGVER; command -v "$CC" >/dev/null || CC=clang
-            CXX=clang++-$CLANGVER; command -v "$CXX" >/dev/null || CXX=clang++
-            command -v "$CC" >/dev/null || { echo "no $CC in PATH"; exit 1; }
-            echo "CC=$(command -v $CC) CXX=$(command -v $CXX)"; $CC --version | head -1
-            # the cache travels in the workspace; compilers are reinstalled
-            # in every fresh VM, so compare them by content, not mtime
-            mkdir -p .ccache
-            printf 'compiler_check = content\nmax_size = 2G\n' > .ccache/ccache.conf
-            chown -R abuild "$PWD"
-            { echo "set -e; cd '$PWD'"
-              echo "rm -rf \"\$HOME/.ccache\"; ln -s '$PWD/.ccache' \"\$HOME/.ccache\""
-              echo "export PATH='$PATH' CC='$CC' CXX='$CXX'"
-              for v in LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx \
-                  CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT ; do
-                eval "echo \"export $v='\$$v'\""
-              done
-              echo 'ccache -z >/dev/null; t0=$(date +%s)'
-              echo './ci_build.sh || rc=$?'
-              echo 'echo "ci_build.sh took $(( $(date +%s) - t0 )) s"; ccache -s; exit ${rc:-0}'
-            } > /tmp/cell.sh
-            cat /tmp/cell.sh
-            su - abuild -c "bash /tmp/cell.sh"
+      - name: Boot the VM
         env:
-          CLANGVER: "${{ matrix.clang }}"
+          CLANG: ${{ matrix.clang }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/img"
+          qemu-img create -q -f qcow2 -F qcow2 -b "clang-$CLANG.c.qcow2" job.qcow2 40G
+          t0=$(date +%s)
+          bash "$GITHUB_WORKSPACE/.image-tools/image/boot.sh" "$RUNNER_TEMP/img/job.qcow2" "$RUNNER_TEMP/img"
+          echo "boot took $(( $(date +%s) - t0 )) s"
+
+      - name: Build and test as abuild in the VM
+        env:
+          CLANGVER: ${{ matrix.clang }}
           LANG: C
           LC_ALL: C
           TZ: UTC
@@ -111,6 +112,33 @@ jobs:
           BUILD_TYPE: default-all-errors
           BUILD_WARNFATAL: "yes"
           BUILD_WARNOPT: auto
+        run: |
+          set -euo pipefail
+          K="$RUNNER_TEMP/img/vmkey"
+          O=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i "$K")
+          vm() { ssh "${O[@]}" -p 2222 root@127.0.0.1 "$@"; }
+          mkdir -p .ccache
+          printf 'compiler_check = content\nmax_size = 2G\n' > .ccache/ccache.conf
+          W=/export/home/abuild/nut
+          t0=$(date +%s)
+          rsync -a --delete -e "ssh ${O[*]} -p 2222" ./ "root@127.0.0.1:$W/"
+          echo "sync in took $(( $(date +%s) - t0 )) s"
+          {
+            echo "set -e; cd $W"
+            echo "rm -rf \$HOME/.ccache; ln -s $W/.ccache \$HOME/.ccache"
+            echo "export PATH=/opt/ooce/bin:/opt/ooce/llvm-$CLANGVER/bin:\$PATH CC=clang-$CLANGVER CXX=clang++-$CLANGVER"
+            for v in LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx \
+                CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT; do
+              printf 'export %s=%q\n' "$v" "${!v}"
+            done
+            echo 'clang-'"$CLANGVER"' --version | head -1; ccache -z >/dev/null; t0=$(date +%s)'
+            echo './ci_build.sh || rc=$?'
+            echo 'echo "ci_build.sh took $(( $(date +%s) - t0 )) s"; ccache -s; exit ${rc:-0}'
+          } > cell.sh
+          rsync -a -e "ssh ${O[*]} -p 2222" cell.sh "root@127.0.0.1:/tmp/cell.sh"
+          vm "chown -R abuild $W && su - abuild -c 'bash /tmp/cell.sh'" || rc=$?
+          rsync -a -e "ssh ${O[*]} -p 2222" "root@127.0.0.1:$W/.ccache/" .ccache/ || true
+          exit "${rc:-0}"
 
       - name: Save ccache
         if: always()
