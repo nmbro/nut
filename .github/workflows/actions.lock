@@ -3,13 +3,39 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
+    '.github/workflows/01-make-dist-report.yml':
+        - 'actions/checkout@v7'
+        - 'actions/github-script@v9'
+    '.github/workflows/01-make-dist-worker.yml':
+        - 'actions/cache@v6'
+        - 'actions/checkout@v7'
+        - 'actions/upload-artifact@v7'
+    '.github/workflows/01-make-dist.yml': []
+    '.github/workflows/05-codeql.yml':
+        - 'actions/cache@v6'
+        - 'actions/checkout@v7'
+        - 'github/codeql-action@v4'
+    '.github/workflows/06-zizmor.yml':
+        - 'actions/checkout@v7'
+    '.github/workflows/07-shellcheck.yml':
+        - 'actions/checkout@v7'
+    '.github/workflows/08-PyNUTClient.yml':
+        - 'actions/checkout@v7'
+        - 'actions/setup-python@v7'
+        - 'pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33'
     '.github/workflows/99-omnios-experiment.yml':
         - 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63'
+        - 'vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42'
 dependencies:
     'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9':
         ref: 'v6.1.0'
+        commit: 'sha1-55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
+        owner_id: 44036562
+        repo_id: 215566462
+    'actions/cache@v6':
+        ref: 'v6'
         commit: 'sha1-55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
         owner_id: 44036562
         repo_id: 215566462
@@ -18,8 +44,50 @@ dependencies:
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
         owner_id: 44036562
         repo_id: 197814629
+    'actions/checkout@v7':
+        ref: 'v7'
+        commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
+        owner_id: 44036562
+        repo_id: 197814629
+    'actions/github-script@v9':
+        ref: 'v9'
+        commit: 'sha1-3a2844b7e9c422d3c10d287c895573f7108da1b3'
+        owner_id: 44036562
+        repo_id: 205262760
+    'actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405':
+        ref: 'v6.2.0'
+        commit: 'sha1-a309ff8b426b58ec0e2a45f0f869d46889d02405'
+        owner_id: 44036562
+        repo_id: 192625525
+    'actions/setup-python@v7':
+        ref: 'v7'
+        commit: 'sha1-6d4fd22b20465ccc0f7354476588e8df7c9ca0e0'
+        owner_id: 44036562
+        repo_id: 192625525
+    'actions/upload-artifact@v7':
+        ref: 'v7'
+        commit: 'sha1-cf430e030ddbb5b0abf93d22962f4752f3646cd9'
+        owner_id: 44036562
+        repo_id: 192625955
+    'github/codeql-action@v4':
+        ref: 'v4'
+        commit: 'sha1-9b3254085494b55a0f7c4c2b3d2d52cc712ce370'
+        owner_id: 9919
+        repo_id: 259445878
     'oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63':
         ref: 'v2.0.3'
         commit: 'sha1-5e2f2482b30b0cb3e14e67f89a80c88c659a7c63'
         owner_id: 81890686
         repo_id: 590286646
+    'pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33':
+        ref: 'v1.14.2'
+        commit: 'sha1-dc37677b2e1c63e2034f94d8a5b11f265b73ba33'
+        owner_id: 647025
+        repo_id: 178055147
+        uses:
+            - 'actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405'
+    'vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42':
+        ref: 'v1.3.7'
+        commit: 'sha1-9576f0b6d15e7696548409baa533bc0a339caf42'
+        owner_id: 71690866
+        repo_id: 727424989

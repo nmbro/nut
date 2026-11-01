@@ -2,8 +2,15 @@
 #   gnu99-gnu++11-clang-NN-omnios-amd64-64bit-nowarn
 # from "Various GNU C99+/C++98+ standard out-of-tree builds with fatal
 # warnings (auto level) and non-GCC toolkits" (BUILD_TYPE=default-all-errors),
-# in an OmniOS VM on a GitHub-hosted runner, booted from the attested
-# nmbro/nut-ci-omnios image chain (pulled by digest, verified before boot).
+# in an OmniOS VM on a GitHub-hosted runner.
+#
+# Timing run, clang 22 on r151058, two runners per variant:
+#   image:       the attested nmbro/nut-ci-omnios image, its boot.sh as is
+#   image-tuned: the same image, with the QEMU machine/CPU options anyvm
+#                (vmactions) uses: hpet=off, smm=off, -cpu host with invtsc,
+#                l3-cache and pmu=off, kvm-pit lost_tick_policy=delay, balloon
+#   vmactions:   vmactions/omnios-vm with its r151058-build image
+# All with 4 CPUs and 12 GB, and the same ccache.
 #
 # ccache: ci_build.sh always uses $HOME/.ccache, so in the VM that is a link
 # into the workspace, which is synced back; the runner caches it per
@@ -23,29 +30,52 @@ env:
   # nmbro/nut-ci-omnios at the commit that built the images: its boot.sh,
   # and the identity the attestations must name
   IMAGE_TOOLS_REF: 95ae0e60d2d19629e79a4e5952129c94fc93c08a
+  DIGEST: sha256:9e915f61c5d349c2bee58ab22d903a9e523f26d6d53440df77d4a368985815ea
+  CLANGVER: "22"
+  VM_MEM: "12288"
+  LANG: C
+  LC_ALL: C
+  TZ: UTC
+  BITS: "64"
+  CSTDVARIANT: gnu
+  CSTDVERSION_c: "99"
+  CSTDVERSION_cxx: "11"
+  CI_BUILDDIR: obj
+  BUILD_TYPE: default-all-errors
+  BUILD_WARNFATAL: "yes"
+  BUILD_WARNOPT: auto
 
 jobs:
   cell:
-    name: "OmniOS r151058, clang ${{ matrix.clang }}, ${{ matrix.mem }} MB, ${{ matrix.disk }}"
+    name: "clang 22, ${{ matrix.variant }} #${{ matrix.rep }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    # Timing run: VM memory x compressed chain vs flattened uncompressed disk,
-    # all four at once so they share the time of day
     strategy:
       fail-fast: false
       matrix:
-        clang: ["22"]
-        digest: [sha256:9e915f61c5d349c2bee58ab22d903a9e523f26d6d53440df77d4a368985815ea]
-        mem: ["8192", "12288"]
-        disk: [chain, flat]
+        variant: [image, image-tuned, vmactions]
+        rep: [1, 2]
     env:
-      CCACHE_KEY: "ccache-omnios-r151058-clang${{ matrix.clang }}-amd64"
+      CCACHE_KEY: "ccache-omnios-r151058-clang22-amd64"
     steps:
+      - name: Runner hardware
+        run: |
+          lscpu | grep -E '^(Model name|CPU\(s\)|Thread|Core|Socket|L3)'
+          free -g | head -2
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ matrix.variant }}-${{ matrix.rep }}"
+          restore-keys: "${{ env.CCACHE_KEY }}-"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.variant != 'vmactions'
         with:
           repository: nmbro/nut-ci-omnios
           ref: ${{ env.IMAGE_TOOLS_REF }}
@@ -53,6 +83,7 @@ jobs:
           persist-credentials: false
 
       - name: Install QEMU and cloud-localds, open /dev/kvm
+        if: matrix.variant != 'vmactions'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
@@ -61,13 +92,14 @@ jobs:
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
 
       - uses: oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63 # v2.0.3
+        if: matrix.variant != 'vmactions'
         with:
           version: 1.3.6
 
       - name: Verify the image's provenance, then pull it
+        if: matrix.variant != 'vmactions'
         env:
           GH_TOKEN: ${{ github.token }}
-          DIGEST: ${{ matrix.digest }}
         run: |
           set -euo pipefail
           gh attestation verify "oci://$IMAGE@$DIGEST" \
@@ -76,64 +108,38 @@ jobs:
             --source-ref refs/heads/main \
             --source-digest "$IMAGE_TOOLS_REF" \
             --deny-self-hosted-runners
-          t0=$(date +%s)
           oras pull "$IMAGE@$DIGEST" -o "$RUNNER_TEMP/img"
-          echo "pull took $(( $(date +%s) - t0 )) s"
-          ls -l "$RUNNER_TEMP/img"
-
-      - name: Restore ccache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .ccache
-          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          restore-keys: "${{ env.CCACHE_KEY }}-"
 
       - name: Boot the VM
+        if: matrix.variant != 'vmactions'
         env:
-          CLANG: ${{ matrix.clang }}
-          DISK: ${{ matrix.disk }}
-          VM_MEM: ${{ matrix.mem }}
+          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/img"
-          top="clang-$CLANG.c.qcow2"
-          if [ "$DISK" = flat ]; then
-            t0=$(date +%s)
-            qemu-img convert -O qcow2 "$top" flat.qcow2
-            echo "flatten took $(( $(date +%s) - t0 )) s"
-            ls -l flat.qcow2; df -h .
-            top=flat.qcow2
+          boot="$GITHUB_WORKSPACE/.image-tools/image/boot.sh"
+          if [ "$VARIANT" = image-tuned ]; then
+            # experiment only: anyvm's x86_64 KVM options, patched into a copy
+            cp "$boot" "$RUNNER_TEMP/boot-tuned.sh"
+            boot="$RUNNER_TEMP/boot-tuned.sh"
+            sed -i 's/-enable-kvm -cpu host /-enable-kvm -machine pc,hpet=off,smm=off,vmport=off -cpu host,kvm=on,l3-cache=on,+hypervisor,migratable=no,+invtsc,pmu=off -global kvm-pit.lost_tick_policy=delay -device virtio-balloon-pci /' "$boot"
+            grep -n 'qemu-system' "$boot"
           fi
-          qemu-img create -q -f qcow2 -F qcow2 -b "$top" job.qcow2 40G
-          t0=$(date +%s)
-          bash "$GITHUB_WORKSPACE/.image-tools/image/boot.sh" "$RUNNER_TEMP/img/job.qcow2" "$RUNNER_TEMP/img"
-          echo "boot took $(( $(date +%s) - t0 )) s"
+          cd "$RUNNER_TEMP/img"
+          qemu-img create -q -f qcow2 -F qcow2 -b "clang-$CLANGVER.c.qcow2" job.qcow2 40G
+          bash "$boot" "$RUNNER_TEMP/img/job.qcow2" "$RUNNER_TEMP/img"
 
       - name: Build and test as abuild in the VM
-        env:
-          CLANGVER: ${{ matrix.clang }}
-          LANG: C
-          LC_ALL: C
-          TZ: UTC
-          BITS: "64"
-          CSTDVARIANT: gnu
-          CSTDVERSION_c: "99"
-          CSTDVERSION_cxx: "11"
-          CI_BUILDDIR: obj
-          BUILD_TYPE: default-all-errors
-          BUILD_WARNFATAL: "yes"
-          BUILD_WARNOPT: auto
+        if: matrix.variant != 'vmactions'
         run: |
           set -euo pipefail
           K="$RUNNER_TEMP/img/vmkey"
           O=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i "$K")
           vm() { ssh "${O[@]}" -p 2222 root@127.0.0.1 "$@"; }
+          vm 'psrinfo -pv | head -3; prtconf | grep -i hpet || echo "no hpet node"'
           mkdir -p .ccache
           printf 'compiler_check = content\nmax_size = 2G\n' > .ccache/ccache.conf
           W=/export/home/abuild/nut
-          t0=$(date +%s)
           rsync -a --delete -e "ssh ${O[*]} -p 2222" ./ "root@127.0.0.1:$W/"
-          echo "sync in took $(( $(date +%s) - t0 )) s"
           {
             echo "set -e; cd $W"
             echo "rm -rf \$HOME/.ccache; ln -s $W/.ccache \$HOME/.ccache"
@@ -151,9 +157,48 @@ jobs:
           rsync -a -e "ssh ${O[*]} -p 2222" "root@127.0.0.1:$W/.ccache/" .ccache/ || true
           exit "${rc:-0}"
 
+      - name: Build and test in the vmactions VM
+        if: matrix.variant == 'vmactions'
+        uses: vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42 # v1.3.7
+        with:
+          release: "r151058-build"
+          cpu: 4
+          mem: 12288
+          envs: "CLANGVER LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT"
+          prepare: |
+            set -e
+            for p in developer/build/autoconf developer/build/automake \
+                developer/build/libtool library/libtool/libltdl \
+                ccache git developer/pkg-config runtime/perl \
+                libusb-1 net-snmp openssl-3 libgd \
+                system/library/mozilla-nss system/library/mozilla-nss/header-nss \
+                library/nspr library/nspr/header-nspr \
+                "developer/clang-$CLANGVER" ; do
+              pkg install -q "$p" || echo "pkg install $p: exit $?"
+            done
+            useradd -m -d /export/home/abuild -s /bin/bash abuild
+          run: |
+            set -e
+            psrinfo -pv | head -3; prtconf | grep -i hpet || echo "no hpet node"
+            mkdir -p .ccache
+            printf 'compiler_check = content\nmax_size = 2G\n' > .ccache/ccache.conf
+            chown -R abuild "$PWD"
+            { echo "set -e; cd '$PWD'"
+              echo "rm -rf \"\$HOME/.ccache\"; ln -s '$PWD/.ccache' \"\$HOME/.ccache\""
+              echo "export PATH=/opt/ooce/bin:/opt/ooce/llvm-$CLANGVER/bin:\$PATH CC=clang-$CLANGVER CXX=clang++-$CLANGVER"
+              for v in LANG LC_ALL TZ BITS CSTDVARIANT CSTDVERSION_c CSTDVERSION_cxx \
+                  CI_BUILDDIR BUILD_TYPE BUILD_WARNFATAL BUILD_WARNOPT ; do
+                eval "echo \"export $v='\$$v'\""
+              done
+              echo 'clang-'"$CLANGVER"' --version | head -1; ccache -z >/dev/null; t0=$(date +%s)'
+              echo './ci_build.sh || rc=$?'
+              echo 'echo "ci_build.sh took $(( $(date +%s) - t0 )) s"; ccache -s; exit ${rc:-0}'
+            } > /tmp/cell.sh
+            su - abuild -c "bash /tmp/cell.sh"
+
       - name: Save ccache
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ccache
-          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ matrix.variant }}-${{ matrix.rep }}"
