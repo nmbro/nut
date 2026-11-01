@@ -1554,11 +1554,15 @@ prompt = no
 commonName = ${TESTCERT_ROOTCA_NAME}/OU=Test/O=NIT/ST=StateOfChaos/C=US
 
 [ extensions ]
+subjectKeyIdentifier=hash
 authorityKeyIdentifier=keyid:always,issuer
 basicConstraints=critical,CA:TRUE
 keyUsage=critical,digitalSignature,cRLSign,keyCertSign
-subjectKeyIdentifier=hash
 EOF
+                        # NOTE: subjectKeyIdentifier must come first: LibreSSL
+                        # (e.g. OpenBSD 8.0) adds the extensions in this order,
+                        # and a self-signed authorityKeyIdentifier needs the
+                        # subject key ID to exist ("unable to get issuer keyid").
                         MSYS_NO_PATHCONV=1 \
                         openssl req -x509 -new -nodes -key rootca.key \
                             -passin file:.pwfile -sha256 \
@@ -1567,8 +1571,11 @@ EOF
                             -config rootca.req.conf \
                         || {
                             log_info "Retry ROOTCA without authorityKeyIdentifier extension"
-                            # Older OpenSSL versions (e.g. 1.0.2 in CentOS 7) do not support this option:
-                            sed 's,^\(authorityKeyIdentifier=\),###\1,' -i rootca.req.conf \
+                            # Older OpenSSL versions (e.g. 1.0.2 in CentOS 7) do not support this option.
+                            # Avoid "sed -i", it behaves differently on some platforms
+                            # and is completely absent on others [#1736 and earlier]
+                            sed 's,^\(authorityKeyIdentifier=\),###\1,' < rootca.req.conf > rootca.req.conf.tmp \
+                            && mv -f rootca.req.conf.tmp rootca.req.conf \
                             && openssl req -x509 -new -nodes -key rootca.key \
                                 -passin file:.pwfile -sha256 \
                                 -days "${TESTCERT_VALIDITY_DAYS}" \
@@ -1696,7 +1703,7 @@ EOF
                             --extKeyUsage "serverAuth,critical" \
                             --nsCertType sslServer,critical \
                             --keyUsage critical,dataEncipherment,keyEncipherment,digitalSignature,nonRepudiation \
-                            --extSAN "dns:localhost,dns:localhost6,dns:nut-server-$$.localdomain,dns:127.0.0.1,dns:::1,ip:127.0.0.1,ip:::1,ip:127.1.2.`expr $$ % 200`" \
+                            --extSAN "dns:localhost,dns:localhost6,dns:nut-server-$$.localdomain,dns:127.0.0.1,ip:127.0.0.1,ip:::1,ip:127.1.2.`expr $$ % 200`" \
                         || die_or_croak "Could not create a NSS Server certificate request"
 
                         # Sign a certificate request with the CA certificate:
@@ -1833,9 +1840,9 @@ subjectAltName = @alt_names
 DNS.1 = localhost
 DNS.2 = localhost6
 DNS.3 = nut-server-$$.localdomain
-# Cater to older Python SSL parser that only looks for DNS:
+# Cater to older Python SSL parser that only looks for DNS (but not "::1",
+# which is no valid DNS name: LibreSSL refuses to sign or verify it):
 DNS.4 = 127.0.0.1
-DNS.5 = ::1
 IP.1 = 127.0.0.1
 IP.2 = ::1
 IP.3 = 127.1.2.`expr $$ % 200`
@@ -2109,9 +2116,9 @@ subjectAltName = @alt_names
 DNS.1 = localhost
 DNS.2 = localhost6
 DNS.3 = nut-client-$$.localdomain
-# Cater to older Python SSL parser that only looks for DNS:
+# Cater to older Python SSL parser that only looks for DNS (but not "::1",
+# which is no valid DNS name: LibreSSL refuses to sign or verify it):
 DNS.4 = 127.0.0.1
-DNS.5 = ::1
 IP.1 = 127.0.0.1
 IP.2 = ::1
 IP.3 = 127.1.2.`expr $$ % 200`
