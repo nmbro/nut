@@ -1,0 +1,88 @@
+# Experiment, not for upstream: why does PyNUT (LibreSSL) reject the
+# certificates NIT makes with NSS certutil on OpenBSD 8.0? Build with NSS,
+# run NIT, then ask LibreSSL's own verifier about each certificate.
+name: "97: OpenBSD NIT SSL diagnostics"
+
+on:
+  push:
+    branches: [exp-omnios-vm]
+    paths: [.github/workflows/97-openbsd-ssl-diag.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Write the build and diagnostics script
+        run: |
+          cat > .diag.sh <<'EOF'
+          set -e
+          W=$(cd "$(dirname "$0")" && pwd); cd "$W"
+          PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export PATH
+          AUTOCONF_VERSION=$(cat /etc/nut-ci-autoconf); AUTOMAKE_VERSION=$(cat /etc/nut-ci-automake)
+          export AUTOCONF_VERSION AUTOMAKE_VERSION
+          openssl version; python3 -c 'import ssl; print(ssl.OPENSSL_VERSION)'
+          ./autogen.sh >autogen.log 2>&1
+          mkdir -p obj && cd obj
+          ../configure -q CC=clang CXX=clang++ --with-nss --with-openssl=no --with-python3 --with-dev >configure.log 2>&1 \
+            || { tail -40 configure.log; exit 1; }
+          make -s -j4 >make.log 2>&1 || { tail -40 make.log; exit 1; }
+          rc=0; make check-NIT > nit.log 2>&1 || rc=$?
+          echo "check-NIT rc=$rc"; grep -E "OVERALL|\] Error" nit.log | tail -8
+          C=tests/NIT/tmp/etc/cert
+          echo "=== files"; ls -lR "$C"
+          CA=$C/rootca/rootca.pem
+          for f in $(find "$C" -name '*.pem' | sort); do
+            echo "=== $f"
+            openssl x509 -in "$f" -noout -subject -issuer -serial -dates 2>&1 || continue
+            openssl x509 -in "$f" -noout -text 2>&1 | sed -n '/X509v3 extensions/,/Signature Algorithm/p'
+            echo "--- verify against rootca.pem"
+            openssl verify -verbose -CAfile "$CA" "$f" 2>&1 || true
+            openssl verify -verbose -purpose sslserver -CAfile "$CA" "$f" 2>&1 || true
+            openssl verify -verbose -purpose sslclient -CAfile "$CA" "$f" 2>&1 || true
+          done
+          echo "=== python ssl load + verify"
+          python3 - "$CA" "$C/upsd" <<'PY' || true
+          import ssl, sys, glob
+          ca, d = sys.argv[1:3]
+          ctx = ssl.create_default_context(cafile=ca)
+          print("CA loaded:", ctx.cert_store_stats())
+          for f in sorted(glob.glob(d + "/*.pem")):
+              print(f, open(f).read().count("BEGIN CERTIFICATE"), "certs")
+          PY
+          EOF
+          cat .diag.sh
+
+      - name: OpenBSD
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
+        with:
+          release: "8.0"
+          cpu: 4
+          mem: 12288
+          usesh: true
+          copyback: false
+          prepare: |
+            set -e
+            for p in bash git gmake libltdl libtool net-snmp neon nss libusb1-- gd cppunit; do
+              pkg_add -I "$p" || echo "pkg_add $p: exit $?"
+            done
+            ac=$(pkg_info -Q autoconf | grep '^autoconf-2\.7' | tail -1)
+            am=$(pkg_info -Q automake | grep '^automake-1\.1[0-9]' | tail -1)
+            pkg_add -I "$ac" "$am"
+            echo "$ac" | sed -E 's/^autoconf-([0-9]+\.[0-9]+).*/\1/' > /etc/nut-ci-autoconf
+            echo "$am" | sed -E 's/^automake-([0-9]+\.[0-9]+).*/\1/' > /etc/nut-ci-automake
+            printf 'abuild:\\\n\t:maxproc=infinity:\\\n\t:datasize=infinity:\\\n\t:openfiles=infinity:\\\n\t:stacksize-cur=8M:\\\n\t:tc=default:\n' >> /etc/login.conf
+            [ -f /etc/login.conf.db ] && cap_mkdb /etc/login.conf || true
+            useradd -m -L abuild -s /bin/ksh abuild
+          run: |
+            set -e
+            chown -R abuild .
+            su -l abuild -c "sh $PWD/.diag.sh"
