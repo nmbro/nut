@@ -18,6 +18,7 @@ name: "99: OmniOS VM experiment"
 on:
   push:
     branches: [exp-omnios-vm]
+    paths: [.github/workflows/99-omnios-experiment.yml]
   workflow_dispatch:
 
 permissions:

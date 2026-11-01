@@ -1,0 +1,170 @@
+# Experiment, not for upstream: the same cell as 99-omnios-experiment.yml,
+#   gnu99-gnu++11-clang-<base>-<bsd>-amd64-64bit-nowarn
+# (BUILD_TYPE=default-all-errors, fatal warnings at the auto level), on the
+# current OpenBSD, FreeBSD and NetBSD releases in vmactions VMs, built as an
+# unprivileged user like the farm's abuild. Timing only: if the numbers are
+# useful, these get attested images of their own like nut-ci-omnios.
+#
+# The cell script is written on the runner and travels into the VM with the
+# workspace; so does the ccache, which the action copies back.
+name: "98: BSD VM experiment"
+
+on:
+  push:
+    branches: [exp-omnios-vm]
+    paths: [.github/workflows/98-bsd-experiment.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cell:
+    name: "${{ matrix.os }} ${{ matrix.release }}, clang, gnu99/gnu++11"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: openbsd
+            release: "8.0"
+          - os: freebsd
+            release: "15.1"
+          - os: netbsd
+            release: "11.0"
+    env:
+      CCACHE_KEY: "ccache-${{ matrix.os }}-${{ matrix.release }}-clang-amd64"
+    steps:
+      - name: Runner hardware
+        run: |
+          lscpu | grep -E '^(Model name|CPU\(s\))'
+          free -g | head -2
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          restore-keys: "${{ env.CCACHE_KEY }}-"
+
+      - name: Write the cell script
+        env:
+          OS: ${{ matrix.os }}
+        run: |
+          set -euo pipefail
+          mkdir -p .ccache
+          printf 'compiler_check = content\nmax_size = 2G\n' > .ccache/ccache.conf
+          {
+            echo 'set -e'
+            echo 'W=$(cd "$(dirname "$0")" && pwd); cd "$W"'
+            echo 'rm -rf "$HOME/.ccache"; ln -s "$W/.ccache" "$HOME/.ccache"'
+            echo 'PATH=/usr/local/lib/ccache:/usr/local/bin:/usr/pkg/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/pkg/sbin:/usr/local/sbin; export PATH'
+            echo 'CC=clang CXX=clang++ CI_CCACHE_SYMLINKDIR=/usr/local/lib/ccache; export CC CXX CI_CCACHE_SYMLINKDIR'
+            for kv in LANG=C LC_ALL=C TZ=UTC BITS=64 CSTDVARIANT=gnu CSTDVERSION_c=99 CSTDVERSION_cxx=11 \
+                CI_BUILDDIR=obj BUILD_TYPE=default-all-errors BUILD_WARNFATAL=yes BUILD_WARNOPT=auto; do
+              echo "$kv; export ${kv%%=*}"
+            done
+            if [ "$OS" = openbsd ]; then
+              # OpenBSD's autoconf/automake wrappers need the version to run
+              echo 'AUTOCONF_VERSION=$(cat /etc/nut-ci-autoconf); AUTOMAKE_VERSION=$(cat /etc/nut-ci-automake); export AUTOCONF_VERSION AUTOMAKE_VERSION'
+            fi
+            echo 'uname -a; clang --version | head -1; ulimit -a | grep -Ei "proc|open"'
+            echo 'ccache -z >/dev/null; t0=$(date +%s); rc=0'
+            echo 'bash ./ci_build.sh || rc=$?'
+            echo 'echo "ci_build.sh took $(( $(date +%s) - t0 )) s"; ccache -s; exit $rc'
+          } > .ci-cell.sh
+          cat .ci-cell.sh
+
+      - name: OpenBSD
+        if: matrix.os == 'openbsd'
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
+        with:
+          release: ${{ matrix.release }}
+          cpu: 4
+          mem: 12288
+          usesh: true
+          prepare: |
+            set -e
+            t0=$(date +%s)
+            sysctl hw.model hw.ncpuonline
+            for p in bash git gmake libltdl libtool ccache net-snmp neon nss libusb1-- gd libmodbus cppunit; do
+              pkg_add -I "$p" || echo "pkg_add $p: exit $?"
+            done
+            ac=$(pkg_info -Q autoconf | grep '^autoconf-2\.7' | tail -1)
+            am=$(pkg_info -Q automake | grep '^automake-1\.1[0-9]' | tail -1)
+            pkg_add -I "$ac" "$am"
+            echo "$ac" | sed -E 's/^autoconf-([0-9]+\.[0-9]+).*/\1/' > /etc/nut-ci-autoconf
+            echo "$am" | sed -E 's/^automake-([0-9]+\.[0-9]+).*/\1/' > /etc/nut-ci-automake
+            cat /etc/nut-ci-autoconf /etc/nut-ci-automake
+            # the farm's login class: NIT starts many processes
+            printf 'abuild:\\\n\t:maxproc=infinity:\\\n\t:datasize=infinity:\\\n\t:openfiles=infinity:\\\n\t:stacksize-cur=8M:\\\n\t:tc=default:\n' >> /etc/login.conf
+            [ -f /etc/login.conf.db ] && cap_mkdb /etc/login.conf || true
+            useradd -m -L abuild -s /bin/ksh abuild
+            mkdir -p /usr/local/lib/ccache
+            for t in cc c++ clang clang++ gcc g++; do ln -sf /usr/local/bin/ccache /usr/local/lib/ccache/$t; done
+            echo "prepare took $(( $(date +%s) - t0 )) s"
+          run: |
+            set -e
+            chown -R abuild .
+            su -l abuild -c "sh $PWD/.ci-cell.sh"
+
+      - name: FreeBSD
+        if: matrix.os == 'freebsd'
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
+        with:
+          release: ${{ matrix.release }}
+          cpu: 4
+          mem: 12288
+          usesh: true
+          prepare: |
+            set -e
+            t0=$(date +%s)
+            sysctl hw.model hw.ncpu
+            for p in bash git gmake autoconf automake libltdl libtool pkgconf ccache python3 net-snmp neon nss libgd libmodbus cppunit; do
+              pkg install -y "$p" || echo "pkg install $p: exit $?"
+            done
+            pw useradd abuild -m -s /bin/sh
+            mkdir -p /usr/local/lib/ccache
+            for t in cc c++ clang clang++ gcc g++; do ln -sf /usr/local/bin/ccache /usr/local/lib/ccache/$t; done
+            echo "prepare took $(( $(date +%s) - t0 )) s"
+          run: |
+            set -e
+            chown -R abuild .
+            su -l abuild -c "sh $PWD/.ci-cell.sh"
+
+      - name: NetBSD
+        if: matrix.os == 'netbsd'
+        uses: vmactions/netbsd-vm@c8a0d7ddb84619a7a8cc4e652efa7950b3fd9f92 # v1.5.2
+        with:
+          release: ${{ matrix.release }}
+          cpu: 4
+          mem: 12288
+          usesh: true
+          prepare: |
+            set -e
+            t0=$(date +%s)
+            sysctl hw.model hw.ncpu
+            command -v pkgin >/dev/null || pkg_add pkgin
+            for p in bash git gmake autoconf automake libltdl libtool pkgconf ccache clang mozilla-rootcerts-openssl net-snmp neon nss libusb1 gd libmodbus cppunit; do
+              pkgin -y install "$p" || echo "pkgin install $p: exit $?"
+            done
+            useradd -m -s /bin/sh abuild
+            mkdir -p /usr/local/lib/ccache
+            for t in cc c++ clang clang++ gcc g++; do ln -sf /usr/pkg/bin/ccache /usr/local/lib/ccache/$t; done
+            echo "prepare took $(( $(date +%s) - t0 )) s"
+          run: |
+            set -e
+            chown -R abuild .
+            su -l abuild -c "sh $PWD/.ci-cell.sh"
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: "${{ env.CCACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}"
