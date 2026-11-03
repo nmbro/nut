@@ -6118,3 +6118,28 @@ const char *xinet_ntopAI(struct addrinfo *ai)
 	free(addrstr);
 	return NULL;
 }
+
+void nut_random_bytes(void *buf, size_t len)
+{
+#if (defined HAVE_ARC4RANDOM_BUF) && HAVE_ARC4RANDOM_BUF \
+ && (defined HAVE_DECL_ARC4RANDOM_BUF) && HAVE_DECL_ARC4RANDOM_BUF
+	arc4random_buf(buf, len);
+#else
+	static int	seeded = 0;
+	unsigned char	*p = (unsigned char *)buf;
+	size_t	i;
+
+	if (!seeded) {
+		struct timeval	tv;
+
+		gettimeofday(&tv, NULL);
+		srand((unsigned int)tv.tv_sec ^ (unsigned int)tv.tv_usec
+			^ ((unsigned int)getpid() << 16));
+		seeded = 1;
+	}
+
+	/* the low bits of some rand() implementations are the weakest */
+	for (i = 0; i < len; i++)
+		p[i] = (unsigned char)(rand() >> 7);
+#endif
+}

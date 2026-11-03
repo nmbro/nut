@@ -754,6 +754,18 @@ https://github.com/networkupstools/nut/milestone/13
       with the actual size detected during device discovery. This should
       avoid potential truncation introduced by the fix above (and avoid
       the overflows it addressed) in normal device interactions. [#3588]
+    * Calls that the OpenBSD linker warns about at every link (as misused or
+      not random) were replaced:
+      - `strcpy()` and `sprintf()` in `upsmon`, `upssched`, `tripplite_usb`
+        and the Masterguard subdriver of `nutdrv_qx`, where the length was
+        already checked; in `upsmon` and `upssched` the `strcpy()` only
+        repeated the `xstrdup()` just before it.
+      - `rand()` and `random()` now go through a new `nut_random_bytes()` in
+        `libcommon`, which uses `arc4random_buf()` where the system has it
+        (BSDs, macOS, GNU libc 2.36 and newer) and otherwise a `rand()` seeded
+        once from the time and process ID. It is used by `apcmicrolink`,
+        `nhs_ser`, `safenet`, and for the `upsd` tracking IDs and the IDs of
+        driver socket queries.
 
  - NUT client libraries:
     * Fixed strict Clang conversion warnings and isolated an OpenSSL macro

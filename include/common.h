@@ -788,6 +788,11 @@ char * get_libname(const char* base_libname);
 /** @brief (Minimum) Size that a string must have to hold a UUID4 (i.e. UUID4 length + the terminating null character). */
 #define UUID4_LEN	37
 
+/** @brief Fill buf with len random bytes, for nonces, IDs and the like
+ * (not key material): arc4random_buf() where the system has it, else
+ * rand() seeded once from the time and the process ID. */
+void nut_random_bytes(void *buf, size_t len);
+
 #define NUT_PATH_MAX	SMALLBUF
 #if (defined(PATH_MAX)) && PATH_MAX > NUT_PATH_MAX
 # undef NUT_PATH_MAX
