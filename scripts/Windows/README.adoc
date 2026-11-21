@@ -4,833 +4,497 @@ NUT and MS Windows
 Introduction
 ------------
 
-NUT is now also available for the Microsoft Windows platform.
+NUT is also available for the Microsoft Windows platform, built with the
+link:https://www.mingw-w64.org[MinGW-w64] toolchains (GCC and the Windows
+headers and C runtime libraries), either semi-natively on Windows in the
+link:https://www.msys2.org/[MSYS2] environments, or cross-compiled on Linux.
 
-This methodology (and Windows support in general) are currently experimental,
-so pull requests are welcome to tie up some loose ends (add more prerequisites,
-test and fix programs, re-enable some code just commented away by `#ifdef`
-directives...)
+This methodology (and Windows support in general) are still experimental, so
+pull requests are welcome to tie up some loose ends (test and fix programs,
+re-enable some code commented away by `#ifdef` directives...)
 
-[NOTE]
-======
-It is possible to prepare a Windows machine with tools and prerequisites
-for building NUT natively, using the MSYS2 environment, as detailed in
-linkdoc:qa-guide[Prerequisites for building NUT on different
-OSes,NUT_Config_Prereqs,docs/config-prereqs.txt], and easily handled
-by NUT common `ci_build.sh` script with default parameters.
+The Windows versions which NUT sources aim to support, which ones a
+particular build runs on (depending on its C runtime), and how to deliver
+the Universal C Runtime with a bundle for Windows 7 SP1, 8 and 8.1, are
+detailed in linkdoc:qa-guide[Prerequisites for building NUT on different
+OSes,NUT_Config_Prereqs,docs/config-prereqs.txt] (see "Windows builds").
 
-Most prerequisites are already packaged in that environment, but notably
-`net-snmp` is missing -- however it can be built from source following this
-document. Possibly, the instructions below would converge in that document
-over time to keep it simple.
-======
+Choosing a build environment
+----------------------------
 
-For additional reference about prerequisite preparation and further ideas for
-the NUT for Windows effort, please see detailed report in the mailing list:
+MSYS2 offers several environments, which differ by the target architecture
+and C runtime (and so by the Windows versions the results run on) and by the
+set of packages they offer:
+
+[options="header"]
+|===============================================================================
+| Environment | Bits | C runtime | Notes
+| UCRT64      | 64   | UCRT      | Recommended for 64-bit builds, used by the
+                                   AppVeyor CI. Packages nearly all NUT
+                                   dependencies. Results need Windows 10 or
+                                   newer, or the UCRT (see above).
+| MINGW32     | 32   | MSVCRT    | For 32-bit builds, used by the GHA-09 CI
+                                   workflow. Offers the toolchain but few
+                                   packages; the other dependencies are built
+                                   from sources (see below). Results run on
+                                   Windows 7 SP1 and newer.
+| MINGW64     | 64   | MSVCRT    | No longer offers `libusb` (1.0) nor `neon`
+                                   packages, so NUT built there would lack USB
+                                   and XML drivers.
+| CLANG64     | 64   | UCRT      | Clang instead of GCC; not regularly tested.
+|===============================================================================
+
+There is no 32-bit UCRT environment in MSYS2.
+
+The MSYS2 environment is selected by the shortcut used to start its terminal
+(e.g. "MSYS2 UCRT64"), or by setting `MSYSTEM` (e.g. `MSYSTEM=MINGW32`) for a
+login shell (`bash -l`), which then sets `MINGW_PREFIX` (e.g. `/ucrt64`),
+`MINGW_PACKAGE_PREFIX` (e.g. `mingw-w64-ucrt-x86_64`), `MINGW_CHOST` and the
+`PATH` accordingly. To avoid mixing toolkits of different environments, keep
+`${MINGW_PREFIX}/bin` early in the `PATH`.
+
+Building in MSYS2
+-----------------
+
+Installing MSYS2, updating it, and enabling symbolic links (which NUT build
+recipes and scripts use) are described in linkdoc:qa-guide[Prerequisites for
+building NUT on different OSes,NUT_Config_Prereqs,docs/config-prereqs.txt]
+(see "Windows with MSYS2").
+
+MSYS2 packages
+~~~~~~~~~~~~~~
+
+The CI builds (see `.github/scripts/appveyor/02-install.bat`) install these
+packages, with `${MINGW_PACKAGE_PREFIX}` of the current environment, skipping
+those which it does not package (`pacman -Sp` tells):
+
+----
+:; for P in base-devel \
+    ${MINGW_PACKAGE_PREFIX}-binutils ${MINGW_PACKAGE_PREFIX}-crt \
+    ${MINGW_PACKAGE_PREFIX}-gcc ${MINGW_PACKAGE_PREFIX}-headers \
+    ${MINGW_PACKAGE_PREFIX}-libgomp ${MINGW_PACKAGE_PREFIX}-libstdc++ \
+    ${MINGW_PACKAGE_PREFIX}-libwinpthread ${MINGW_PACKAGE_PREFIX}-make \
+    ${MINGW_PACKAGE_PREFIX}-pkgconf ${MINGW_PACKAGE_PREFIX}-winpthreads \
+    autoconf-wrapper automake-wrapper libtool ${MINGW_PACKAGE_PREFIX}-libltdl \
+    ${MINGW_PACKAGE_PREFIX}-ccache git aspell aspell-en python \
+    ${MINGW_PACKAGE_PREFIX}-libusb ${MINGW_PACKAGE_PREFIX}-libsystre \
+    ${MINGW_PACKAGE_PREFIX}-neon ${MINGW_PACKAGE_PREFIX}-libpng \
+    ${MINGW_PACKAGE_PREFIX}-cppunit ${MINGW_PACKAGE_PREFIX}-nss \
+    ${MINGW_PACKAGE_PREFIX}-sqlite3 ${MINGW_PACKAGE_PREFIX}-zlib \
+    nsinstall zip ${MINGW_PACKAGE_PREFIX}-openssl \
+  ; do if pacman -Sp $P >/dev/null 2>&1 ; then LIST="$LIST $P" ; \
+    else echo "SKIP: $P" ; fi ; done ; pacman -S --needed $LIST
+----
+
+Notes:
+
+* `libsystre` provides the POSIX `regex.h` API (it wraps the TRE library),
+  which NUT and `net-snmp` need.
+* `sqlite3`, `zlib`, `nsinstall` and `zip` are needed to build NSS from
+  sources where it is not packaged (e.g. MINGW32), and `libpng` and `zlib`
+  for `libgd`.
+* The MSYS (not MinGW) `python` is enough for the NUT test suite (PyNUT);
+  documentation builds (`asciidoc`, `a2x`) are not covered here, the CI
+  builds go without them (`--with-docs=no`).
+* `libgd` is deliberately not installed from MSYS2: its package enables all
+  image formats, so about 30 more DLLs (e.g. video codecs for its HEIF and
+  AVIF support) would have to be delivered with NUT; a PNG-only one is
+  built from sources instead (see below).
+* Neither `net-snmp` nor `libmodbus` with USB (RTU over USB) support are
+  packaged; they are built from sources for all environments.
+* A download mirror may refuse requests for a while (e.g. HTTP 429 Too Many
+  Requests); then run `pacman -S` again: what was downloaded stays in the
+  pacman cache.
+
+Prerequisites built from sources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The `build-mingw-prereqs.sh` script in this directory builds the dependencies
+which the current environment does not package (as `pkg-config` tells), and
+installs them into its prefix. Run it in the MSYS2 terminal of the wanted
+environment, with `MSYS2_PATH` set (otherwise it assumes a Linux cross-build,
+see below):
+
+----
+:; export MSYS2_PATH=1
+:; ./scripts/Windows/build-mingw-prereqs.sh
+----
+
+It downloads (and verifies the checksums of) the sources into `DLDIR`
+(default: `~/nut-win-deps`) and builds them in a subdirectory per `ARCH`,
+where it also keeps an installation tree of each, so that later runs (e.g.
+in a new MSYS2 installation with a restored `DLDIR`) only re-install them.
+Pass `-f` to rebuild everything anyway. `NUT_PREREQS_ONLY` can limit it to
+some of the `provide_*()` steps, e.g. `NUT_PREREQS_ONLY="libregex libusb"`.
+
+[options="header"]
+|===============================================================================
+| Dependency        | Built where not packaged, e.g.  | Notes
+| regex (TRE and the MSYS2 "systre" wrapper) | Linux cross-builds | Also
+  installed as `libregex` and `libgnurx`, like the MSYS2 `libsystre` package.
+| `libusb` (1.0)    | MINGW32, MINGW64, Linux cross-builds |
+| `libltdl`         | Linux cross-builds | For `nut-scanner` (which loads the
+  libraries of the scanned protocols at run time).
+| `cppunit`         | MINGW32, Linux cross-builds | Only for the C++ client
+  library tests (`make check`).
+| NSPR and NSS      | MINGW32, Linux cross-builds | Same versions and patches
+  as the MSYS2 packages for the 64-bit environments.
+| OpenSSL, `expat`  | Linux cross-builds | For `neon` (and OpenSSL for NUT).
+| `neon`            | MINGW32, MINGW64, Linux cross-builds | With OpenSSL and
+  expat, without NLS.
+| `libpng`          | Linux cross-builds | For `libgd`.
+| `libgd`           | all | A minimal (PNG only) build for `upsimage.cgi`.
+| `net-snmp`        | all | For `snmp-ups` and the SNMP scan of `nut-scanner`.
+| `libmodbus`       | all | NUT's fork with USB (RTU over USB) support, rebuilt
+  when its Git source changes.
+|===============================================================================
+
+Keep these up to date, the security libraries in particular. Where MSYS2
+packages a newer version (for UCRT64) of a dependency than the script
+builds, the script prints a warning (on GitHub Actions also an annotation
+and a job summary line); then update its `DEP_VERSION`, checksum and MSYS2
+recipe commit.
+
+NOTE: The `ccache` 4.14 of MINGW32 requires the `USERPROFILE` and
+`LOCALAPPDATA` environment variables, which a login shell started from
+another program (e.g. CI or IDE) may lack; otherwise compilers fail with
+"The USERPROFILE environment variable must be set" messages, which make
+`configure` scripts conclude that the "C compiler cannot create executables".
+
+Building NUT
+~~~~~~~~~~~~
+
+The `ci_build.sh` script in the NUT source root handles MSYS2 builds (with
+`ccache` if installed). The CI builds use (see
+`.github/scripts/appveyor/04-build_script.bat`):
+
+----
+:; CI_SKIP_CHECK=true CANBUILD_WITH_LIBMODBUS_USB=yes \
+   WITH_LIBNUTPRIVATE=true NUT_SSL_VARIANTS=nss \
+   ./ci_build.sh --with-docs=no
+----
+
+* `NUT_SSL_VARIANTS=nss` builds with NSS for SSL/TLS (as the CI bundles
+  are); `openssl` is possible too.
+* `WITH_LIBNUTPRIVATE=true` builds the NUT common code as a shared private
+  library, which the programs of the bundle share, instead of linking it
+  into each one.
+* With `DO_USE_AUTOCONF_CACHE=yes` and `CI_CACHE_NUT_BASEDIR` set, the
+  `configure` results are kept (`config.cache` files) for later builds with
+  the same `configure.ac`, `m4/*.m4`, options and environment; `configure`
+  takes several minutes in MSYS2.
+
+Alternatively, use the usual `./autogen.sh && ./configure && make` steps.
+
+Testing
+~~~~~~~
+
+`make check` (`.github/scripts/appveyor/07-test_script.bat` runs it like the
+CI builds do) runs the unit tests, the C++ client library tests (with
+`cppunit`), and the NUT Integration Testing suite (NIT: data server, dummy
+drivers, clients including PyNUT, with SSL/TLS), which needs a `NUT_STATEPATH`
+directory for its state files, as a Windows path:
+
+----
+:; export NUT_STATEPATH='C:\Users\me\AppData\Local\Temp\nut-test'
+:; mkdir -p "$NUT_STATEPATH"
+:; make -j 2 check
+----
+
+Bundling NUT for Windows
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+`make install-win-bundle DESTDIR=...` installs NUT into the `DESTDIR` and
+adds the DLLs (from the MSYS2 environment) which the NUT programs and
+libraries need, so that the bundle runs on a Windows system without MSYS2.
+The CI builds pack such a bundle as an archive
+(`.github/scripts/appveyor/08-after_test.bat`). Options (as `make` or
+environment variables):
+
+* `WIN_BUNDLE_DEVEL=yes` keeps the files only needed to build programs
+  against NUT (headers, static and import libraries, `pkg-config` files),
+  and NUT libraries which no bundled program uses (e.g. the C++
+  `libnutclient`); by default they are removed, as is the PyNUT module
+  (published on PyPI as "PyNUTClient").
+* `WIN_BUNDLE_STRIP=no` keeps the debug information in NUT programs and
+  libraries; by default it is removed (about halving the bundle size).
+* `WIN_BUNDLE_DEBUGINFO_DIR=...` saves that debug information first, as
+  `<path in bundle>.debug` files with `.gnu_debuglink` references from the
+  stripped files, e.g. to deliver it separately for crash analysis (as the
+  CI builds do).
+* `WIN_BUNDLE_UCRT_DIR=...` (a `Redist/ucrt/DLLs/<arch>` directory of a
+  Windows SDK, or `auto` to look for an installed SDK) delivers the UCRT
+  DLLs "app-locally" with a UCRT-based build, so that it can start on
+  Windows 7 SP1, 8 and 8.1 without the UCRT update.
+
+The `nutconf` program is the only C++ program in the bundle; with a private
+`libnutconf` it is linked with static GCC runtime libraries, so the bundle
+does not carry `libstdc++-6.dll` for it alone.
+
+To see which DLLs a program needs, e.g. when checking a bundle for another
+Windows version, `dllldd.sh` in this directory lists them (also used by the
+bundle recipes), as does `objdump -p FILE | grep 'DLL Name'`.
+
+Running the bundle on Windows
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A few points which come up when configuring and running a bundle on a
+Windows host (rather than building it):
+
+* Use forward slashes in the NUT configuration files, e.g.
+  `CERTPATH C:/nut/etc/ca.pem`. The configuration parser treats a backslash
+  as an escape character, so a Windows path like `C:\nut\etc` would be
+  mangled (`\n` and friends).
+* `upsd` listens on TCP port 3493; the network clients (`upsc`, `upsmon`,
+  the CGI programs) connect to it there. Open that port in the Windows
+  firewall on the server for remote clients (and allow ICMP echo if you
+  check reachability with `ping`).
+* `NUT_CONFPATH` overrides the directory where the programs look for their
+  configuration files, e.g. to run a second `upsmon` with its own
+  `upsmon.conf` from another directory.
+
+Cross-building on Linux
+-----------------------
+
+NUT for Windows can also be cross-compiled on Linux, e.g. on Debian or Ubuntu
+(also in WSL2, or in containers), with the MinGW-w64 toolchains:
+
+----
+# MSVCRT toolchains (like MSYS2 MINGW32 and MINGW64):
+:; sudo apt-get install mingw-w64
+# UCRT toolchain (like MSYS2 UCRT64), packaged by Debian 13 and newer
+# (not by Ubuntu 24.04), named x86_64-w64-mingw32ucrt:
+:; sudo apt-get install gcc-mingw-w64-ucrt64 g++-mingw-w64-ucrt64
+----
+
+Besides the NUT build prerequisites (`autoconf`, `automake`, `libtool`,
+`pkgconf`, `make`, `python3`, `perl`, `curl`, `patch`, `xz-utils`,
+`dpkg-dev`... as detailed in linkdoc:qa-guide[Prerequisites for building NUT on different
+OSes,NUT_Config_Prereqs,docs/config-prereqs.txt]), Debian packages
+`libz-mingw-w64-dev` (zlib, for the MSVCRT toolchains and, on Debian 13,
+also for the UCRT one), but no MinGW builds of the other NUT dependencies;
+`build-mingw-prereqs.sh` builds them when run without `MSYS2_PATH`. Its
+environment variables:
+
+* `ARCH`: the host triplet, e.g. `x86_64-w64-mingw32` (default) or
+  `i686-w64-mingw32`;
+* `PREFIX`: where to install the dependencies, default `/usr/$ARCH` (where
+  the toolchain itself is, so `sudo` is used for that unless `SUDO=" "`);
+* `HOST_FLAG` (default `--host=$ARCH`) and `BUILD_FLAG` (by default
+  `--build=` the `dpkg-architecture -qDEB_BUILD_GNU_TYPE` value). These
+  defaults are not set when both `ARCH` and `PREFIX` are given: then set
+  them too, or the dependencies get built with the native compiler;
+* `CC`, `CXX`, `AR`, `RANLIB` and the resource compiler (`RC` for libtool,
+  `WINDRES` and `WINDMC` for NUT) if the tool names differ from the
+  `ARCH`, e.g. for the UCRT toolchain (with `ARCH=x86_64-w64-mingw32` for
+  the `configure` scripts, as older `config.sub` copies do not know the
+  `x86_64-w64-mingw32ucrt` name). With these, the prerequisites (and NUT
+  with `build-mingw-nut.sh`, which sets them itself) build the same with
+  or without the MSVCRT toolchain installed too. Other builds which look
+  for more tools by the host triplet (e.g. `dlltool`) may need the UCRT
+  tools offered under the `x86_64-w64-mingw32-*` names, e.g. as symbolic
+  links in `/usr/local/bin` on a system without the MSVCRT toolchain (as
+  the CodeQL job does):
++
+----
+:; for T in /usr/bin/x86_64-w64-mingw32ucrt-* ; do \
+     sudo ln -s "$T" "/usr/local/bin/x86_64-w64-mingw32-${T#/usr/bin/x86_64-w64-mingw32ucrt-}" ; \
+   done
+----
+* `DLDIR` and `NUT_PREREQS_ONLY`, as above;
+* `MAKEFLAGS`, e.g. `MAKEFLAGS=-j16` (default `-j 8`).
+
+For example, as the CodeQL analysis of the Windows code does (see
+`.github/workflows/05-codeql.yml`, which runs this as root in a Debian
+container):
+
+----
+:; TOOLCHAIN=x86_64-w64-mingw32ucrt
+:; HOST_FLAG="--host=x86_64-w64-mingw32" \
+   BUILD_FLAG="--build=`dpkg-architecture -qDEB_BUILD_GNU_TYPE`" \
+   ARCH=x86_64-w64-mingw32 PREFIX="/usr/$TOOLCHAIN" \
+   CC="$TOOLCHAIN-gcc" CXX="$TOOLCHAIN-g++" \
+   AR="$TOOLCHAIN-ar" RANLIB="$TOOLCHAIN-ranlib" \
+   RC="$TOOLCHAIN-windres" WINDRES="$TOOLCHAIN-windres" \
+   NUT_PREREQS_ONLY="libregex libusb libltdl" \
+   ./scripts/Windows/build-mingw-prereqs.sh
+----
+
+The state of the `provide_*()` steps in cross-builds (most were developed
+for MSYS2):
+
+[options="header"]
+|===============================================================================
+| Step              | In cross-builds
+| `libregex`, `libusb`, `libltdl` | Built; exercised by the CodeQL CI job.
+| `cppunit`, `openssl`, `expat`, `libpng`, `neon`, `libgd`, `netsnmp`,
+  `libmodbus_git` | Built (OpenSSL, `expat` and `libpng` only in
+  cross-builds, MSYS2 packages them).
+| `nspr`            | Built with a native `nsinstall` and the cross binutils
+  named with their paths.
+| `nss`             | Built with the cross tool names, `OS_ARCH=WINNT`, a
+  native `nsinstall`, `CROSS_COMPILE=1` (no library signing), a serial
+  `make`, and the `sqlite3` copy which NSS bundles.
+|===============================================================================
+
+All of them were built in manual tests for 32-bit and 64-bit MSVCRT and
+64-bit UCRT (Ubuntu 24.04 and Debian 13 containers); cross-built NUT then
+has SSL (OpenSSL by default when both are there, `NUT_SSL_VARIANTS=nss` for
+NSS), XML, SNMP, Modbus, CGI and `nut-scanner`. By default (without
+`NUT_PREREQS_ONLY`) the script tries all of them, prints a summary, and
+fails at the end if any is missing.
+
+OpenSSL is configured with its own `Configure` script, which needs `perl`.
+In cross-builds it gets `--cross-compile-prefix=$ARCH-`, unless `CC` (and
+`AR`, `RANLIB`, `RC`) name the tools, e.g. for UCRT.
+
+To build NUT itself, the `build-mingw-nut.sh` script in this directory sets
+the cross-build flags (for `/usr/$ARCH` prefixes, or `/usr/$TOOLCHAIN` if
+set, e.g. `TOOLCHAIN=x86_64-w64-mingw32ucrt` for a UCRT build with `all64`),
+runs `configure` and `make`, and installs the result with the DLLs it needs
+(by `make install-win-bundle`, see above; or with its own older logic, if
+`INSTALL_WIN_BUNDLE=false`) into `nut_install_${ARCH}` (with a `nut_install`
+symbolic link to the latest one). Pass e.g. `MAKEFLAGS=-j16` for parallel
+builds.
+
+* out-of-tree from the Git source (default):
+
+	:; (cd scripts/Windows/ && ./build-mingw-nut.sh all64)
+	:; (cd scripts/Windows/ && ./build-mingw-nut.sh all32)
+	:; (cd scripts/Windows/ && TOOLCHAIN=x86_64-w64-mingw32ucrt ./build-mingw-nut.sh all64)
+
+* from a NUT release tarball (`SOURCEMODE=stable`, optionally with
+  `VER_OPT`), or from a `make dist` tarball of the current sources
+  (`SOURCEMODE=dist`).
+
+The NUT CI script calls it too (with parallel `make`):
+
+----
+:; BUILD_TYPE=cross-windows-mingw-32 ./ci_build.sh
+:; BUILD_TYPE=cross-windows-mingw-64 ./ci_build.sh
+----
+
+To check that a cross-built bundle starts, e.g. that it has all the DLLs
+it needs, its programs can be run with Wine (e.g. `wine bin/upsc.exe -V`):
+a missing DLL is reported as "Library ... not found". Wine also starts
+programs with DLLs of the wrong C runtime, so for UCRT bundles also check
+that no DLL imports `msvcrt.dll` (`objdump -p FILE | grep 'DLL Name'`).
+Programs of the prerequisites themselves (e.g. the NSS `certutil.exe` in
+`$PREFIX/bin`) have no bundle; to run them, list the prefix directories
+and the GCC runtime directory in `WINEPATH` (separated by `;`), e.g. for
+32-bit MSVCRT on Ubuntu 24.04:
+
+----
+:; P=/usr/i686-w64-mingw32 ; mkdir -p /tmp/nssdb
+:; WINEPATH="$P/bin;$P/lib;/usr/lib/gcc/i686-w64-mingw32/13-win32" \
+     wine "$P/bin/certutil.exe" -N -d sql:/tmp/nssdb --empty-password
+----
+
+Note that with Wine installed, libtool runs `winepath` during MinGW
+cross-builds (harmless; in containers, use `docker run --init` to reap the
+`wineserver` processes).
+
+Cross-building in containers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The `Dockerfile.cross-build` file in this directory makes container images
+with the packages listed above (plus `ccache`, and Wine to check the
+results), so that cross-builds do not need them on the build system itself.
+It needs Docker with BuildKit (the default builder of current Docker
+releases), or a compatible tool. Its build context is this directory; from
+the top of the NUT source tree:
+
+----
+# Ubuntu 24.04: MSVCRT toolchains (32-bit and 64-bit)
+:; docker build -f scripts/Windows/Dockerfile.cross-build --target wine \
+     -t nut-xwin:ubuntu24.04 scripts/Windows
+# Debian 13: also the UCRT toolchain (64-bit)
+:; docker build -f scripts/Windows/Dockerfile.cross-build --target wine \
+     --build-arg BASE=debian:trixie \
+     --build-arg EXTRA_PKGS="gcc-mingw-w64-ucrt64 g++-mingw-w64-ucrt64" \
+     -t nut-xwin:trixie scripts/Windows
+----
+
+The package layers are cached, so re-building is quick. The images do not
+hold NUT sources nor build results: mount the source tree into a container,
+and run the steps described above in it, as `root` (the prerequisites are
+installed into the toolchain prefix under `/usr`):
+
+----
+:; docker run --rm -it --init -v "$PWD":/src -w /src \
+     -v nut-ccache:/ccache nut-xwin:ubuntu24.04
+# in the container, e.g. for 32-bit MSVCRT:
+:; ARCH=i686-w64-mingw32 MAKEFLAGS=-j16 ./scripts/Windows/build-mingw-prereqs.sh
+:; (cd scripts/Windows/ && MAKEFLAGS=-j16 ./build-mingw-nut.sh all32)
+:; (cd scripts/Windows/nut_install && wine bin/upsc.exe -V)
+----
+
+Notes:
+
+* `--init` reaps the `wineserver` processes which libtool starts (see
+  above); the `nut-ccache` volume keeps the `ccache` data (the cache keys
+  include the compiler, so all the images and targets can share it).
+* The prerequisites installed in a container are gone with it. To keep
+  them, also mount a volume for their downloads and builds (`DLDIR`, by
+  default `/root/nut-win-deps`): the script then re-installs its earlier
+  builds quickly. Or build an image with them (the `prereqs` stage, for one
+  target per image), which Docker caches until `build-mingw-prereqs.sh`
+  changes:
++
+----
+:; docker build -f scripts/Windows/Dockerfile.cross-build --target prereqs \
+     -t nut-xwin-prereqs:x86_64 scripts/Windows
+# 32-bit MSVCRT: add --build-arg PREREQ_ARCH=i686-w64-mingw32
+# 64-bit UCRT: use the Debian 13 build arguments shown above, and add
+#   --build-arg PREREQ_TOOLCHAIN=x86_64-w64-mingw32ucrt
+----
++
+Use the plain (`wine`) images to test changes of the prerequisites script
+itself, as the `prereqs` images do not run it again.
+* Files which the container creates in the mounted source tree belong to
+  `root`; e.g. `sudo chown -R "$(id -u):$(id -g)" .` afterwards.
+
+Notes for 32-bit builds
+-----------------------
+
+* Methods of the Windows API, and of some libraries (e.g. `libgd`), use the
+  calling convention of the Windows API in 32-bit builds, where it differs
+  from the C one (in 64-bit builds they are the same). Their names are then
+  decorated with the size of their arguments (e.g. `gdImagePng@8`), so link
+  checks which declare
+  such methods themselves (like `AC_SEARCH_LIBS()`) fail: the NUT `configure`
+  checks for `libgd` include its header instead. Callbacks passed to such
+  libraries must be declared with the same convention, e.g. `LIBUSB_CALL`
+  for `libusb` hotplug and transfer callbacks, or programs crash.
+* `size_t` and `long` are 32 bits, and so is `time_t` in MINGW32: use the
+  NUT format macros (e.g. `PRIuSIZE`) rather than hard-coded `%ll...` ones.
+
+Continuous integration
+----------------------
+
+* AppVeyor (`appveyor.yml`) builds, tests and bundles NUT for Windows in the
+  MSYS2 UCRT64 environment, with the step scripts in
+  `.github/scripts/appveyor/`. Pull request builds restore the build cache
+  but do not save it.
+* The GitHub Actions workflow "GHA-09" (`.github/workflows/09-windows-mingw32.yml`)
+  does the same in the MSYS2 MINGW32 environment (32-bit), calling the same
+  step scripts with `NUT_MSYSTEM=MINGW32` (also `NUT_SSL_VARIANTS`,
+  `NUT_BUNDLE_ARCH`, `NUT_BUNDLE_VERSION` and `NUT_STATEPATH` select other
+  settings than the AppVeyor defaults). Its caches of MSYS2 packages,
+  prerequisites built from sources, `ccache` and `configure` results are
+  saved by `master` branch builds; its job summary reports how long each
+  step took, how the caches were restored and the archive sizes.
+* The CodeQL workflow "GHA-05" also analyzes the Windows-specific code,
+  with cross-builds for 32-bit (MSVCRT) and 64-bit (UCRT) Windows.
+
+History
+-------
+
+For additional reference about the beginnings of the NUT for Windows effort,
+please see the detailed reports in the mailing list:
 
 * https://alioth-lists.debian.net/pipermail/nut-upsdev/2016-April/007171.html -
   [Nut-upsdev] How to build NUT Windows Port
 
 * https://alioth-lists.debian.net/pipermail/nut-upsdev/2016-April/007172.html -
   [Nut-upsdev] NUT Windows port sources review
-
-
-Cross compiling from Linux
---------------------------
-
-Fortunately, you are not forced to have a real Windows system to compile NUT.
-The following chapters will guide you through setting up up a
-link:http://mingw-w64.sourceforge.net[MinGW-w64] build environment and
-compiling NUT.
-
-NOTE: These instructions were re-verified (and codebase slightly amended)
-with an Ubuntu 21.10 container as the dedicated build environment.
-Support was added to NUT common `ci_build.sh` script to call the helper
-`build-mingw-nut.sh` from this directory when cross-building on Linux
-for Windows in the specially crafted sandbox (conformance is assumed),
-if you use one of `BUILD_TYPE=cross-windows-mingw(-64|-32|)` as this
-made NUT CI farm integration easier.
-
-NOTE: The Ubuntu (20.04 or newer) environment provided by WSL2 also seems
-suitable for semi-native builds on a Windows system, following the same
-instructions. However, note that some builds may be broken or complicated
-by antivirus software (it really dislikes someone writing into EXE files).
-
-Beside MinGW detailed below, you would need the usual dependencies to
-configure and build NUT (if you would bootstrap it from github sources
-rather than a tarball -- without a pre-generated `configure` script).
-Notably, `asciidoc` with its many dependencies may be required for
-generation of man pages into the intermediate tarball used by script
-referenced below.
-
-MinGW-w64 build environment
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-You will first need to setup a MinGW-w64 build environment.
-
-NOTE: While adding `ccache` is optional, it is quite recommended especially
-if you plan to iterate many builds (whether of NUT or the dependencies).
-At least for Ubuntu 21.10 packaging, it is integrated with `mingw-w64`
-tool naming out of the box.
-
-On Debian/Ubuntu and similar systems, use:
-
-	# apt-get update
-	# apt-get install mingw-w64
-
-On Redhat and similar systems, use:
-
-	# ???
-
-You will also need pthread and mingw regex libraries, and other recommended
-dependencies as detailed below.
-
-[NOTE]
-======
-Be sure to install NUT build prerequisites and toolkits, as detailed
-in linkdoc:qa-guide[Prerequisites for building NUT on different
-OSes,NUT_Config_Prereqs,docs/config-prereqs.txt].
-
-If builds complain similarly to
-----
-syntax error near unexpected token 'LIBUSB_1_0,'
- 'PKG_CHECK_MODULES(LIBUSB_1_0, libusb-1.0 >= 0.9.1)'
-----
-make sure you have installed `pkgconf`, e.g.:
-
-	# apt-get install pkgconf
-======
-
-[NOTE]
-================================================================================
-
-If you use script `./build-mingw-nut.sh` mentioned below, you may skip setting
-these environment variables when building NUT itself. You would however need
-to use them once (per `ARCH`) to provide the prerequisites below if they are
-built from source.
-
-The build routines detailed below expect to be run in a terminal (shell per
-`ARCH`) with all these environment variables set once and inherited from one
-component build to another. Should you need to rebuild something, you would
-have to set these variables again in that session.
-
-When using the compilation approach, you would typically use the following
-`ARCH`, `HOST_FLAG` and `BUILD_FLAG`, as well as `CC`, `CFLAGS`, `LDFLAGS`
-and `PREFIX` values:
-
-- prefer either to
-+
-------
-:; export ARCH="x86_64-w64-mingw32"
-------
-+
-or
-+
-------
-:; export ARCH="i686-w64-mingw32"
-------
-+
-(it can help to open two terminals and copy one `ARCH` into each
-  and then the other lines below into both of them; be sure to use
-  separate directory trees for the unpacked build workspaces, while
-  you can use the same source tarball download directory for both -- just
-  do not paste the commands simultaneously to avoid downloading in parallel;
-  the `wget -c` used below would skip downloads that are already completed)
-
-- for either-`ARCH` build environment further set:
-+
-------
-:; export HOST_FLAG="--host=$ARCH"
-:; PREFIX="/usr/$ARCH"
-------
-
-- NOTE: Technically, these instructions may apply to builds with MinGW on
-  Windows semi-natively (e.g. to add the net-snmp libraries which are not
-  packaged for MSYS2 MinGW currently). Generally you can use environment
-  variables set by different launchers of MinGW terminal sessions depending
-  on the target profile (32/64 bit, gcc/clang, libc implementation...)
-
-** For `sudo make install` in instructions below, you may have to omit the
-   `sudo` part if missing in your MSYS2 MinGW environment;
-
-** For a "native build" directly for consumption in the currently configured
-   environment, you would not use cross-build path in `PREFIX` and not set
-   the `HOST_FLAG` value:
-+
-------
-:; export ARCH="$MINGW_CHOST"
-:; PREFIX="$MINGW_PREFIX"
-:; export HOST_FLAG=""
-------
-
-** If you wanted a "real cross-build" for a different MinGW environment, you
-   might want to set those (but the NUT build would then need to be told to
-   search for headers, libraries and pkg-config data in extra locations):
-+
-------
-:; export ARCH="$MINGW_CHOST"
-:; PREFIX="$MINGW_PREFIX/$ARCH"
-:; export HOST_FLAG="--host=$ARCH"
-------
-** You might want then to verify that it sets values you expect with a command
-   like this:
-+
-------
-:; set | grep -E '^(ARCH|PREFIX|HOST_FLAG)='
-#export ARCH="x86_64-w64-mingw32"
-#PREFIX="/mingw64/x86_64-w64-mingw32"
-------
-
-- on Debian/Ubuntu style systems also:
-+
-------
-:; BUILD_FLAG="--build=`dpkg-architecture -qDEB_BUILD_GNU_TYPE`"
-------
-  * Note that this bit is very Debian specific!
-    Hints for Redhat-style systems are wanted.
-
-- also export the following compilation flags:
-+
-------
-:; export CFLAGS="$CFLAGS -D_POSIX=1 -I${PREFIX}/include/"
-:; export CXXFLAGS="$CXXFLAGS -D_POSIX=1 -I${PREFIX}/include/"
-:; export LDFLAGS="$LDFLAGS -L${PREFIX}/lib/"
-:; export PKG_CONFIG_PATH="${PREFIX}"/lib/pkgconfig
-------
-
-- prepare the download and build area, e.g. to match copy-paste instructions
-below, it would be like:
-+
-------
-:; DLDIR=~/nut-win-deps
-:; WSDIR="$DLDIR"/"$ARCH"
-:; mkdir -p "$WSDIR" "$DLDIR"
-------
-
-================================================================================
-
-NOTE: Instructions below use `sudo` to specify operations you may need to run
-with privilege elevation (assuming installation into a `PREFIX=/usr/$ARCH`);
-the majority of operations can be done (recommended) as an unprivileged user.
-
-pthread library
-^^^^^^^^^^^^^^^
-
-NOTE: The MinGW distribution in Ubuntu 21.10 already includes pthread files,
-so the build instructions below were not relevant for this component.
-
-On older Debian systems, you can use the following packages repository:
-link:https://launchpad.net/~mingw-packages/+archive/ppa[MinGW PPA]
-
-However at the moment this PPA seems to be stale and serve very old packages,
-so it could be better to roll your own as detailed below.
-
-On Redhat: FIXME
-
-////////////////////////////////////////////////////////////////////////////////
-http://fedoraproject.org/wiki/MinGW/CrossCompilerFramework
-https://fedoraproject.org/wiki/Packaging:MinGW?rd=Packaging:MinGW_Future
-https://fedoraproject.org/wiki/Packaging:MinGW_Old
-////////////////////////////////////////////////////////////////////////////////
-
-You can also compile it (where that is still needed) using:
-
-	:; ( cd "$DLDIR" && wget -c http://mirrors.kernel.org/sources.redhat.com/pthreads-win32/pthreads-w32-2-8-0-release.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/pthreads-w32-2-8-0-release.tar.gz
-	:; cd pthreads-w32-2-8-0-release/
-	:; make -f GNUmakefile "CROSS=$ARCH-" GC-inlined
-
-[NOTE]
-======
-If it complains about
-`pthread.h:307:8: error: redefinition of 'struct timespec'`
-please edit `config.h` to add a `HAVE_STRUCT_TIMESPEC` definition
-and re-run `make`, e.g.:
-
-	:; echo '#define HAVE_STRUCT_TIMESPEC 1' >> config.h
-	:; make -f GNUmakefile "CROSS=$ARCH-" GC-inlined
-
-There may also be some warnings from newer compilers about
-`cast to pointer from integer of different size` -- these are
-presumed inconsequential. You can try a not-"inlined" build instead.
-======
-
-Finally, install the resulting files into locations under `PREFIX`:
-
-	:; sudo mkdir -p "${PREFIX}/pthreads/lib/"
-	:; sudo cp *.dll "${PREFIX}/pthreads/lib/"
-	:; sudo mkdir -p "${PREFIX}/lib/"
-	:; sudo cp *.a "${PREFIX}/lib/"
-	:; sudo mkdir -p "${PREFIX}/pthreads/include/"
-	:; sudo cp pthread.h sched.h semaphore.h "${PREFIX}/pthreads/include/"
-
-
-MinGW regex library
-^^^^^^^^^^^^^^^^^^^
-
-You can compile it  using:
-
-	:; ( cd "$DLDIR" && wget -c http://netcologne.dl.sourceforge.net/project/mingw/Other/UserContributed/regex/mingw-regex-2.5.1/mingw-libgnurx-2.5.1-src.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/mingw-libgnurx-2.5.1-src.tar.gz
-	:; cd mingw-libgnurx-2.5.1
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-libtool (libltdl)
-^^^^^^^^^^^^^^^^^
-
-	:; ( cd "$DLDIR" && wget -c https://ftpmirror.gnu.org/libtool/libtool-2.4.6.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/libtool-2.4.6.tar.gz
-	:; cd libtool-2.4.6
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-libusb
-^^^^^^
-
-* libusb-1.0
-
-	:; ( cd "$DLDIR" && wget -c https://sourceforge.net/projects/libusb/files/libusb-1.0/libusb-1.0.26/libusb-1.0.26.tar.bz2 )
-	:; cd "$WSDIR"
-	:; tar xjf "$DLDIR"/libusb-1.0.26.tar.bz2
-	:; cd libusb-1.0.26
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-* libusb-compat-0.1 (API translation layer for older codebase, uses libusb-1.0)
-
-	:; ( cd "$DLDIR" && wget -c https://github.com/libusb/libusb-compat-0.1/archive/refs/heads/master.zip -O libusb-compat-0.1-master.zip )
-	:; cd "$WSDIR"
-	:; unzip "$DLDIR"/libusb-compat-0.1-master.zip
-	:; cd libusb-compat-0.1-master
-	:; ./bootstrap.sh
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-zlib
-^^^^
-
-Needed for libpng at least, but likely many others too.
-
-[NOTE]
-======
-On recent Debian/Ubuntu systems, you might have luck with:
-------
-:; sudo apt-get install libz-mingw-w64-dev
-------
-======
-
-On any system, you can build from source; however the current version has
-a nuance to address for mingw builds:
-
-	:; ( cd "$DLDIR" && wget -c -O zlib-1.2.12.tar.gz https://github.com/madler/zlib/archive/refs/tags/v1.2.12.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/zlib-1.2.12.tar.gz
-	:; cd zlib-1.2.12
-
-	# Edit the `configure` script (not autotools generated) to
-	# neuter the MINGW `leave 1` line:
-	  MINGW* | mingw*)
-	# temporary bypass
-	        rm -f $test.[co] $test $test$shared_ext
-	        echo "Please use win32/Makefile.gcc instead." | tee -a configure.log
-	-       leave 1
-	+       ###leave 1
-	        LDSHARED=${LDSHARED-"$cc -shared"}
-	        LDSHAREDLIBC=""
-	        EXE='.exe' ;;
-
-	:; CHOST="$ARCH" ./configure --prefix="$PREFIX"
-	:; make
-	:; sudo make install
-
-
-openssl
-^^^^^^^
-
-OpenSSL is an optional dependency for NUT itself (it or Mozilla NSS can
-be used to protect the networking communications), and for libneon below
-(OpenSSL or GnuTLS).
-
-Note the non-standard `config` script bundled along, and hoops to jump
-through...
-
-	:; ( cd "$DLDIR" && wget -c https://www.openssl.org/source/openssl-1.1.1q.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/openssl-1.1.1q.tar.gz
-	:; cd openssl-1.1.1q
-	# Build options partially lifted from OBS packaging, see:
-	# https://build.opensuse.org/package/view_file/windows:mingw:win32/mingw32-openssl-1_1/mingw32-openssl-1_1.spec?expand=1
-	:; ( case "$ARCH" in
-	     *x86_64*) SYSTEM=MINGW64 ;;
-	     *i?86*) SYSTEM=MINGW32 ;;
-	     *) SYSTEM=MINGW ;;
-	     esac
-	     export SYSTEM
-	     ./config \
-	        no-idea enable-rfc3779 zlib shared \
-	        -fno-common \
-	        --prefix="$PREFIX" --cross-compile-prefix="/usr/bin/$ARCH-" \
-	        -DPURIFY -D__USE_GNU
-	   )
-	:; make
-	:; sudo make install
-
-
-xz (liblzma)
-^^^^^^^^^^^^
-
-Needed for libxml2.
-
-	:; ( cd "$DLDIR" && wget -c https://tukaani.org/xz/xz-5.2.5.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/xz-5.2.5.tar.gz
-	:; cd xz-5.2.5
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-libxml2
-^^^^^^^
-
-Needed for libneon.
-
-/////////////////////////////////////////////////////////////////////////////
-// ...and for fontconfig
-/////////////////////////////////////////////////////////////////////////////
-
-	:; ( cd "$DLDIR" && wget -c https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.9.14/libxml2-v2.9.14.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/libxml2-v2.9.14.tar.gz
-	:; cd libxml2-v2.9.14
-	:; ./autogen.sh --prefix="$PREFIX" $HOST_FLAG --without-python
-	:; make
-	:; sudo make install
-
-
-gd (cgi)
-^^^^^^^^
-
-Note that for the general-case build libgd supports a huge dependency tree,
-so for the NUT purposes we are going for as little as possible.
-
-Initially the purpose was to have libgd installed to build/link against for
-the Windows target. Subsequently more dependencies were documented, but still
-further refinement may be needed to have it actually usable for CGI web pages
-rendering.
-
-Finally note that end-users would have to install a CGI-capable web server to
-use this feature in practice.
-
-* zlib: see above
-
-* iconv:
-+
-Seems to be directly used by `libgd` (at least queried in its `configure` script):
-
-	:; ( cd "$DLDIR" && wget -c https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.17.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/libiconv-1.17.tar.gz
-	:; cd libiconv-1.17
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-* freetype:
-+
-NOTE: For some reason it won't build in an Ubuntu 20.04 running under WSL2 --
-blocks running an `apinames.exe` program that it has just built. May be a
-problem of the emulation layer (as it calls the EXE via `/tools/init`),
-and/or of the system antivirus interaction?..
-
-	:; ( cd "$DLDIR" && wget -c https://download.savannah.gnu.org/releases/freetype/freetype-2.12.1.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/freetype-2.12.1.tar.gz
-	:; cd freetype-2.12.1
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG --without-brotli
-	:; make
-	:; sudo make install
-
-
-/////////////////////////////////////////////////////////////////////////////
-WIP - fontconfig not usable yet due to ICU failing to cross-build
-Maybe an older version of either would fare better?..
-
-* gperf is needed by fontconfig build routine as a tool usable on the build
-  system, so a packaged install should suffice, e.g. `apt-get install gperf`.
-  Otherwise, build one from source (and note that this may be needed e.g.
-  for native builds on Windows, but not "just" for using a cross-binary that
-  the build host can generate but not run natively).
-
-	:; ( cd "$DLDIR" && wget -c http://ftp.gnu.org/pub/gnu/gperf/gperf-3.1.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/gperf-3.1.tar.gz
-	:; cd gperf-3.1
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-* ICU:
-
-For a cross-build of ICU, you should first build and install a copy
-for the host system, then use it as a resource for the final build.
-Set aside a good part of an hour to get this built:
-
-	:; ( cd "$DLDIR" && wget -c https://github.com/unicode-org/icu/releases/download/release-71-1/icu4c-71_1-src.tgz )
-
-	# This one is built for native host architecture and provides
-	# some resources to ARCH builds later on:
-	:; cd "$DLDIR"
-	:; tar xzf icu4c-71_1-src.tgz
-	:; rm -rf icu-native || true
-	:; mv icu icu-native   # note, no version in the pathname
-	:; cd icu-native/source
-	:; ./configure CFLAGS= CXXFLAGS= LDFLAGS= ARCH=
-	:; make
-
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/icu4c-71_1-src.tgz
-	:; cd icu/source
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG --with-cross-build="$DLDIR"/icu-native/source
-	:; make
-	:; sudo make install
-
-
-* fontconfig:
-
-	:; ( cd "$DLDIR" && wget -c https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.14.0.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/fontconfig-2.14.0.tar.gz
-	:; cd fontconfig-2.14.0/
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG --enable-libxml2
-	:; make
-	:; sudo make install
-
-// for fontconfig
-/////////////////////////////////////////////////////////////////////////////
-
-
-* libpng:
-
-	:; ( cd "$DLDIR" && wget -c https://download.sourceforge.net/libpng/libpng-1.6.37.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/libpng-1.6.37.tar.gz
-	:; cd libpng-1.6.37
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-* libgd itself:
-+
-TODO: This works for 64-bit builds, however 32-bit ones are burdened with `@8`
-or `@12` suffixes to symbol names, and subsequent link checks in NUT fail to
-find `libgd` as usable -- so CGI is not built in 32-bit mode. According to
-such context, this must be something about STDCALL and/or "extern C"...
-
-	:; ( cd "$DLDIR" && wget -c https://github.com/libgd/libgd/releases/download/gd-2.3.3/libgd-2.3.3.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/libgd-2.3.3.tar.gz
-	:; cd libgd-2.3.3
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG \
-	    --with-png --with-freetype \
-	    --without-tiff --without-jpeg --without-xpm \
-	    --without-fontconfig
-	# Note: currently we configure away almost all capabilities,
-	# to match the dependency binaries (and/or headers) present
-	# on the build system. Review resulting build recipes that
-	# they DO NOT refer to system /usr/include locations!
-	# In practice we would likely need the fontconfig pieces to work.
-	:; make
-	:; sudo make install
-
-
-libmodbus
-^^^^^^^^^
-
-	:; ( cd "$DLDIR" && wget -c https://libmodbus.org/releases/libmodbus-3.1.7.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/libmodbus-3.1.7.tar.gz
-	:; cd libmodbus-3.1.7
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-net-snmp
-^^^^^^^^
-
-	:; ( cd "$DLDIR" && wget -c https://sourceforge.net/projects/net-snmp/files/net-snmp/5.9.1/net-snmp-5.9.1.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/net-snmp-5.9.1.tar.gz
-	:; cd net-snmp-5.9.1
-	:; yes "" | ./configure --prefix="$PREFIX" $HOST_FLAG \
-	    --with-default-snmp-version=3 --disable-agent --disable-daemon \
-	    --with-sys-contact="" --with-sys-location="" --with-logfile=none \
-	    --with-persistent-directory="${PREFIX}/var/net-snmp" \
-	    --disable-embedded-perl --without-perl-modules --disable-perl-cc-checks \
-	    --enable-shared
-	# NOTE: ./configure script may ask a few questions, or may just print
-	# a banner that it would; hopefully all replies needed for current
-	# version are covered above
-	# The following long `LDFLAGS` ensure that shared `libnetsnmp-40.dll`
-	# gets built and later installed (and siblings which NUT does not use):
-	:; make LDFLAGS="-no-undefined -lws2_32 -lregex -Xlinker --ignore-unresolved-symbol=_app_name_long -Xlinker --ignore-unresolved-symbol=app_name_long"
-	:; find . -type f -name '*.dll' -o -name '*.dll.a'
-	:; sudo make install
-
-NOTE: The `net-snmp` code base tends to only `make` a static-linking
-library for Windows by default (the shared library only appears with
-`LDFLAGS` proposed above).
-In this case consumers must link not only with `-lnetsnmp` but also its
-dependencies explicitly -- see `Libs.private` line in `netsnmp.pc` of
-your build (or installation in `${PREFIX}/lib/pkgconfig/netsnmp.pc`).
-Builds can extract this info with `pkg-config --libs --static netsnmp`
-as NUT scenarios do (for mingw, if shared-linking attempt fails).
-
-
-libneon
-^^^^^^^
-
-As of release 0.32.2 libneon failed to build  -- neither in Windows MSYS2 nor
-in Linux mingw environments. Some tinkering was needed to make it happen, and
-was posted as https://github.com/notroj/neon/pull/84 (pull request sourced
-from https://github.com/jimklimov/neon/tree/fix-mingw-cross branch). Due to
-this, instructions below differ from others by setting up an out-of-tree build
-instead of a tarball download. Eventually it would hopefully suffice to fetch
-https://notroj.github.io/neon/neon-0.32.5.tar.gz or newer (PR was merged after
-libneon 0.32.4 release).
-
-NOTE: Ability to `make docs` here relies on presence of `xmlto` program.
-In NUT CI workers prepared according to linkdoc:qa-guide[Prerequisites for
-building NUT on different OSes,NUT_Config_Prereqs,docs/config-prereqs.txt] this
-should be among dependencies for `asciidoc`; beware that with prerequisites it
-has quite a large installation footprint. Alternately check PR #69, or consult
-the Makefiles for current `install` target definition to run its job without
-`install-docs` part (example posted below).
-
-	#:; ( cd "$DLDIR" && git clone -b fix-mingw-cross https://github.com/jimklimov/neon neon-git )
-	:; ( cd "$DLDIR" && git clone https://github.com/notroj/neon neon-git )
-	:; ( cd "$DLDIR/neon-git" && ./autogen.sh )
-	:; cd "$WSDIR"
-	:; rm -rf neon-git ; mkdir neon-git
-	:; cd neon-git
-	:; "$DLDIR"/neon-git/configure --prefix="$PREFIX" $HOST_FLAG \
-	    --enable-shared --with-ssl=openssl
-	:; make all docs
-	:; sudo make install \
-	   || sudo make install-lib install-headers install-config install-nls ###install-docs
-
-
-cppunit
-^^^^^^^
-
-Needed for C++ unit tests (optional, and may be pointless in cross-builds
-where you can not also run the tested binaries built for another platform):
-
-	:; ( cd "$DLDIR" && wget -c http://dev-www.libreoffice.org/src/cppunit-1.15.1.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/cppunit-1.15.1.tar.gz
-	:; cd cppunit-1.15.1
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make all
-	:; sudo make install
-
-
-/////////////////////////////////////////////////////////////////////////////
-// for avahi
-
-libpcre
-^^^^^^^
-
-Needed for glib2 (further for avahi).
-
-	:; ( cd "$DLDIR" && wget -c https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.40/pcre2-10.40.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/pcre2-10.40.tar.gz
-	:; cd pcre2-10.40
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make all
-	:; sudo make install
-	:; sudo ln -s libpcre2-posix.pc ${PREFIX}/lib/pkgconfig/libpcre.pc
-
-
-gettext/libintl
-^^^^^^^^^^^^^^^
-
-WARNING: Currently gettext does not build, at least on WSL2 Ubuntu,
-fails with `undefined reference to '__imp_formatstring_ruby'`.
-
-Needed for glib2 (further for avahi).
-
-	:; ( cd "$DLDIR" && wget -c https://ftp.gnu.org/pub/gnu/gettext/gettext-0.20.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/gettext-0.20.tar.gz
-	:; cd gettext-0.20
-	# Flags tweaked due to http://savannah.gnu.org/bugs/?36443
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG \
-	    CFLAGS="$CFLAGS -O2" CXXFLAGS="$CXXFLAGS -O2"
-	:; make all
-	:; sudo make install
-
-
-glib2
-^^^^^
-
-WARNING: Currently glib2 does not build, at least on WSL2 Ubuntu, fails to
-find gettext (not built above).
-
-Needed for avahi.
-
-Requires `meson` build system, e.g. via:
-------
-:; sudo apt-get install meson
-------
-
-NOTE: Latest glib-2.73.3 as of this writing requires `meson >= 0.60.0` but the
-one provided in WSL2 Ubuntu 20.04 OS packages is older (0.53.2). In this case,
-try an older glib2 release, e.g. glib-2.72.1 seems compatible.
-
-Configuration options below were initially borrowed from
-https://build.opensuse.org/package/view_file/windows:mingw:win32/mingw32-glib2/mingw32-glib2.spec?expand=1
-
-	:; ( cd "$DLDIR" && wget -c https://gitlab.gnome.org/GNOME/glib/-/archive/2.72.1/glib-2.72.1.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/glib-2.72.1.tar.gz
-	:; cd glib-2.72.1
-	:; case "$ARCH" in
-	     *x86_64*) cp -pf .gitlab-ci/cross_file_mingw64.txt .gitlab-ci/cross_file_${ARCH}.txt ;;
-	     *i686*) sed 's,x86_64,i686,g' < .gitlab-ci/cross_file_mingw64.txt > .gitlab-ci/cross_file_${ARCH}.txt ;;
-	   esac
-	# We do not have an ARCH-dependent pkg-config binary:
-	:; sed "s,^pkgconfig = .*\$,pkgconfig = 'pkg-config'," \
-	    -i .gitlab-ci/cross_file_${ARCH}.txt
-	# With meson, config and build can be done in one shot:
-	:; meson --prefix="$PREFIX" \
-	    --buildtype=plain --wrap-mode=nodownload \
-	    --auto-features=auto \
-	    --cross-file=.gitlab-ci/cross_file_${ARCH}.txt \
-	    . build \
-	    --default-library=shared \
-	    -Dman=false -Dgtk_doc=false \
-	    -Dsystemtap=false -Ddtrace=false \
-	    -Dinstalled_tests=false -Dlibelf=disabled
-	:; sudo meson install
-
-
-avahi
-^^^^^
-
-WARNING: Currently avahi does not build, at least on WSL2 Ubuntu, fails to
-find glib2 (not built above).
-
-Release 0.8 (and current git as of this writing) sources use `-Wl,-z...`
-linking flags which are not supported by mingw `ld` tooling, and so fail
-to configure.
-
-[NOTE]
-======
-To build from Git sources or regenerate `configure` in tarball sources
-like shown below, you should also have `gettextize` tool before running
-`autogen.sh`, e.g. via:
-------
-:; sudo apt install intltool autopoint
-:; ( cd "$DLDIR" && git clone https://github.com/lathiat/avahi avahi-git )
-:; ( cd "$DLDIR/avahi-git" && ./autogen.sh )
-# Stock script would go on to try configuring by default,
-# and that bit fails in cross-env vars
-------
-======
-
-	:; ( cd "$DLDIR" && wget -c https://github.com/lathiat/avahi/releases/download/v0.8/avahi-0.8.tar.gz )
-	:; cd "$WSDIR"
-	:; tar xzf "$DLDIR"/avahi-0.8.tar.gz
-	:; cd avahi-0.8
-	:; vi common/acx_pthread.m4
-	# Edit `common/acx_pthread.m4` to remove `-Wl,-z,defs` near
-	# AC_MSG_CHECKING([whether -pthread is sufficient with -shared])
-	# Alternatively just edit `configure` script from the tarball.
-	:; ./autogen.sh || true
-	:; ./configure --prefix="$PREFIX" $HOST_FLAG
-	:; make
-	:; sudo make install
-
-
-// for avahi
-/////////////////////////////////////////////////////////////////////////////
-
-
-Other requirements
-^^^^^^^^^^^^^^^^^^
-
-ipmi, ssl with Mozilla NSS...
-
-* https://ftp.gnu.org/gnu/freeipmi/freeipmi-1.6.9.tar.gz
-* https://ftp.mozilla.org/pub/security/nss/releases/NSS_3_79_RTM/src/nss-3.79-with-nspr-4.34.tar.gz
-
-
-Cross-building NUT with MinGW in Linux
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-After preparing at least the required dependencies above, use one of
-the following methods to compile NUT as:
-
-* out-of-tree from git source (easier to iterate for development, so default):
-
-	(cd scripts/Windows/ && ./build-mingw-nut.sh all64)
-+
-or, depending on the build environment(s) you have prepared,
-+
-	(cd scripts/Windows/ && ./build-mingw-nut.sh all32)
-+
-[NOTE]
-======
-This is also automated for common NUT CI build script, calling it like this:
-------
-# Try to guess bitness based on ARCH or CFLAGS:
-BUILD_TYPE=cross-windows-mingw ./ci_build.sh
-
-# Or specifically:
-BUILD_TYPE=cross-windows-mingw-32 ./ci_build.sh
-BUILD_TYPE=cross-windows-mingw-64 ./ci_build.sh
-------
-======
-
-
-* an existing source tarball (can be fetched from NUT website):
-
-	:; export SOURCEMODE=stable
-	### Optionally: export VER_OPT=2.8.1
-	:; cd scripts/Windows/
-	:; ./build-mingw-nut.sh
-
-
-* To (re-)build from scratch with a dist tarball, e.g. testing how a stable
-release would fare, starting from a git checkout, use this:
-
-	:; ./autogen.sh && ./configure && make dist && \
-	    (cd scripts/Windows/ && SOURCEMODE=dist ./build-mingw-nut.sh all64)
-
-If everything goes fine, you will find a NUT installation tree in 'nut_install'
-sub-directory (technically, a symbolic link to `nut_install_${ARCH}` directory).
-Note the script accepts some parameters e.g. for 32/64 bit build targets.
-
-NOTE: For other ways of building and packaging, it might make sense for
-a packaged delivery to also `make install DESTDIR=.../nut_install_${ARCH}`
-from the sources of dependency projects built above, or at least to copy
-the built `*.dll` files from `${PREFIX}/bin` to `nut_install_${ARCH}/bin`.
-For those dependencies that are listed above, the script does this best-effort
-activity (does not fail if some are missing, but running the programs can fail
-later).

@@ -152,6 +152,8 @@ extern "C" {
 # define TYPE_FD int
 # define ERROR_FD (-1)
 # define VALID_FD(a) ((a)>=0)
+/* Printing format for TYPE_FD, e.g. "FD %" PRI_FD */
+# define PRI_FD "d"
 
 /* Type of what NUT serial/SHUT methods juggle: */
 # define TYPE_FD_SER TYPE_FD
@@ -162,6 +164,7 @@ extern "C" {
 # define TYPE_FD_SOCK TYPE_FD
 # define ERROR_FD_SOCK ERROR_FD
 # define VALID_FD_SOCK(a) VALID_FD(a)
+# define PRI_FD_SOCK PRI_FD
 
 #else	/* WIN32 */
 
@@ -172,6 +175,8 @@ extern "C" {
 # define TYPE_FD HANDLE
 # define ERROR_FD (INVALID_HANDLE_VALUE)
 # define VALID_FD(a) ((a)!=INVALID_HANDLE_VALUE)
+/* HANDLE is a "void *" so this needs no cast */
+# define PRI_FD "p"
 
 # ifndef INVALID_SOCKET
 #  define INVALID_SOCKET ((SOCKET)(-1))
@@ -185,6 +190,8 @@ extern "C" {
  * in existing headers) nor generally negative values, as in Unix socket API.
  */
 # define VALID_FD_SOCK(a) ((a)!=INVALID_SOCKET)
+/* SOCKET is a UINT_PTR, same type as uintptr_t */
+# define PRI_FD_SOCK PRIuPTR
 
 typedef struct serial_handler_s {
 	HANDLE handle;
@@ -394,7 +401,7 @@ int sendsignal(const char *progname, const char * sig, int check_current_prognam
 #endif	/* WIN32 */
 
 int snprintfcat(char *dst, size_t size, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 3, 4)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 3, 4)));
 
 /*****************************************************************************
  * String methods for space-separated token lists, used originally in dstate *
@@ -574,7 +581,7 @@ typedef enum eupsnotify_state {
 const char *str_upsnotify_state(upsnotify_state_t state);
 /* Note: here fmt may be null, then the STATUS message would not be sent/added */
 int upsnotify(upsnotify_state_t state, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 
 /* Exposed to code consumers (NUT daemons) for NOTIFY_STATE_EXTEND_TIMEOUT
  * By default upsnotify_extend_timeout_usec == 0 so the
@@ -609,9 +616,9 @@ struct timeval *upslog_start_sync(struct timeval *tv);
 /* upslog*() messages are sent to syslog always;
  * their life after that is out of NUT's control */
 void upslog_with_errno(int priority, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 void upslogx(int priority, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 
 /* upsdebug*() messages are only logged if debugging
  * level is high enough. To speed up a bit (minimize
@@ -623,9 +630,9 @@ void upslogx(int priority, const char *fmt, ...)
  * and pass around pointers and other data.
  */
 void s_upsdebug_with_errno(int level, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 void s_upsdebugx(int level, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 void s_upsdebug_hex(int level, const char *msg, const void *buf, size_t len);
 void s_upsdebug_ascii(int level, const char *msg, const void *buf, size_t len);
 void s_upsdebug_ascii_compact(int level, const char *msg, const void *buf, size_t len);
@@ -655,9 +662,9 @@ void s_upsdebug_ascii_compact(int level, const char *msg, const void *buf, size_
 	do { if (nut_debug_level >= (level)) { s_upsdebug_ascii_compact((level), msg, buf, len); } } while(0)
 
 void fatal_with_errno(int status, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3))) __attribute__((noreturn));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3))) __attribute__((noreturn));
 void fatalx(int status, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3))) __attribute__((noreturn));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3))) __attribute__((noreturn));
 
 /* Report CONFIG_FLAGS used for this build of NUT similarly to how
  * upsdebugx(1, ...) would do it, but not limiting the string length
@@ -686,7 +693,7 @@ char *xstrdup(const char *string);
 
 int vsnprintfcat(char *dst, size_t size, const char *fmt, va_list ap);
 int snprintfcat(char *dst, size_t size, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 3, 4)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 3, 4)));
 
 /* Define a missing va_copy using __va_copy, if available: */
 #ifndef HAVE_VA_COPY
@@ -719,18 +726,18 @@ int validate_formatting_string(const char *fmt_dynamic, const char *fmt_referenc
 
 int vsnprintfcat_dynamic(char *dst, size_t size, const char *fmt_dynamic, const char *fmt_reference, va_list va);
 int snprintfcat_dynamic(char *dst, size_t size, const char *fmt_dynamic, const char *fmt_reference, ...)
-	__attribute__ ((__format__ (__printf__, 4, 5)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 4, 5)));
 
 int vsnprintf_dynamic(char *dst, size_t size, const char *fmt_dynamic, const char *fmt_reference, va_list va);
 int snprintf_dynamic(char *dst, size_t size, const char *fmt_dynamic, const char *fmt_reference, ...)
-	__attribute__ ((__format__ (__printf__, 4, 5)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 4, 5)));
 
 /* Practical helper with a static buffer which we can use for setting
  * values as a "%s" string e.g. in calls to dstate_setinfo(), etc.
  * Sets buffer to empty string in case of errors.
  */
 char * mkstr_dynamic(const char *fmt_dynamic, const char *fmt_reference, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 
 /**** REGEX helper methods ****/
 

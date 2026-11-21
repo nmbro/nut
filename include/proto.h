@@ -83,7 +83,7 @@ extern "C" {
 
 # if !defined (HAVE_SNPRINTF) || defined (__Lynx__)
 int snprintf (char *str, size_t count, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 3, 4)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 3, 4)));
 # endif
 
 # if !defined (HAVE_VSNPRINTF)

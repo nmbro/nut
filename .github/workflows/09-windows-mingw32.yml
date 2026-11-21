@@ -1,0 +1,267 @@
+# Build and test NUT for Windows as a 32-bit (i686) program in the MSYS2
+# MINGW32 environment (MSVCRT based, so it also runs on older Windows),
+# and publish the resulting bundle and its debug information as workflow
+# artifacts.
+#
+# This is a proof of concept for running the NUT for Windows CI builds on
+# GitHub-hosted runners: it calls the same step scripts as the AppVeyor
+# recipe (appveyor.yml), from .github/scripts/appveyor/, in the same order.
+# Those default to the AppVeyor setup (MSYS2 UCRT64, 64-bit); the variables
+# in "env" below select another MSYS2 environment and its specifics. MSYS2
+# is pre-installed on the GitHub-hosted Windows runners (in C:\msys64), so
+# no third-party action is needed to set it up. Several libraries are not
+# packaged by MSYS2 for MINGW32 (libusb, NSS, neon, cppunit...): they are built
+# from sources by scripts/Windows/build-mingw-prereqs.sh in the
+# 03-before_build step, as are net-snmp and libmodbus for all builds. Like
+# the AppVeyor builds, it uses NSS for SSL/TLS (the default NUT_SSL_VARIANTS).
+#
+# Runs on pull_request (not pull_request_target), so for PRs from forks it
+# has a read-only token and runs the copy of this workflow in the PR, which
+# is fine as it needs no write permissions. Only master branch pushes save
+# the caches (which all runs restore), see .github/CI.md.
+#
+# The job summary reports the step durations, how the caches were restored
+# and their sizes, the ccache statistics and the archive sizes (see
+# .github/scripts/windows-gha-summary.ps1).
+
+name: "GHA-09: NUT for Windows, 32-bit (MSYS2 MINGW32)"
+
+on:
+  push:
+    branches:
+      - 'master'
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mingw32:
+    name: "Build, test and bundle NUT for Windows (i686, MINGW32)"
+    runs-on: windows-2025
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      # For the job summary: read the step durations of this run
+      actions: read
+
+    env:
+      # Read by the .github/scripts/appveyor/*.bat and *.ps1 step scripts:
+      NUT_MSYSTEM: MINGW32
+      NUT_BUNDLE_ARCH: i686
+      NUT_BUNDLE_VERSION: gha-${{ github.run_number }}
+      NUT_STATEPATH: 'C:\nut-ci\nut-test'
+      # Read by scripts/Windows/build-mingw-prereqs.sh: where to download
+      # and build the prerequisites not packaged for MINGW32 (cached below)
+      DLDIR: /c/nut-ci/nut-win-deps
+      # Same settings as in appveyor.yml (with more cache space here):
+      CCACHE_DIR: 'C:/nut-ci/ccache'
+      CCACHE_MAXSIZE: 1500MiB
+      MSYS: "winsymlinks:nativestrict"
+      # Read by ci_build.sh: keep the "configure" results (config.cache) in
+      # this location (cached below); within it, ci_build.sh separates them
+      # by hashes of configure.ac, m4/*.m4, the OS and the configure options
+      # and environment, and retries without a cache that configure finds
+      # inconsistent
+      DO_USE_AUTOCONF_CACHE: 'yes'
+      CI_CACHE_NUT_BASEDIR: 'C:/nut-ci/autoconf'
+      # Instead of "uname -s -r -v -m" there, which changes with each runner
+      # image (MSYS2 runtime version and build date): the relevant package
+      # versions are a part of the cache key below
+      CI_CACHE_NUT_OS_ID: 'msys2-mingw32-windows-2025'
+      # NIT (make check) would also use CI_CACHE_NUT_BASEDIR to cache its test
+      # certificates ("auto" when that directory exists), and then point the
+      # PyNUT tests to an OpenSSL CA directory, which the MSYS2 Python fails
+      # to verify the server with; keep the NIT defaults (a CA file), and the
+      # cache for configure results only
+      DO_USE_NIT_TESTCERT_CACHE: 'no'
+
+    steps:
+    # Git for Windows on the runners defaults to core.autocrlf=true, which
+    # would check out the "text=auto" files (e.g. data/driver.list.in) with
+    # CRLF line endings, so "make check" format checks of such files fail;
+    # the source tree also contains symlinks
+    - name: Configure git to check out files as in the repository
+      shell: cmd
+      run: |
+        git config --global core.autocrlf false
+        git config --global core.eol lf
+        git config --global core.symlinks true
+
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        # Full history and tags, for "git describe" based NUT version
+        fetch-depth: 0
+        fetch-tags: true
+        persist-credentials: false
+
+    - name: Restore cache of MSYS2 packages
+      id: cache-pacman
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\msys64\var\cache\pacman\pkg'
+        key: mingw32-pacman-${{ hashFiles('.github/scripts/appveyor/02-install.bat') }}
+        restore-keys: mingw32-pacman-
+
+    - name: Restore cache of prerequisites built from sources
+      id: cache-deps
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\nut-ci\nut-win-deps'
+        key: mingw32-deps-${{ hashFiles('scripts/Windows/build-mingw-prereqs.sh') }}
+        restore-keys: mingw32-deps-
+
+    - name: Restore cache of ccache
+      id: cache-ccache
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\nut-ci\ccache'
+        # Saved anew by each master build, restore the latest one
+        key: mingw32-ccache-${{ github.run_id }}
+        restore-keys: mingw32-ccache-
+
+    # The package databases of the runner image may be older than what
+    # the mirrors currently serve, so refresh them first
+    - name: Refresh MSYS2 package databases
+      shell: cmd
+      run: C:\msys64\usr\bin\bash -lc "pacman --noconfirm -Sy"
+
+    - name: "02: install MSYS2 packages"
+      id: install
+      shell: cmd
+      run: call .github\scripts\appveyor\02-install.bat
+
+    # The "configure" results also depend on the installed MSYS2 package
+    # versions (compilers, libraries), which change without any change in
+    # our sources: hash their list for the cache key below. Only those of
+    # the MSYS2 environment (toolchain, libraries) and the autotools, not
+    # of the MSYS2 base system, which differs between runner images.
+    - name: Hash the installed MSYS2 package versions
+      id: pkgs
+      shell: powershell
+      run: |
+        $env:MSYSTEM = $env:NUT_MSYSTEM
+        $prefix = (& C:\msys64\usr\bin\bash -lc 'echo $MINGW_PACKAGE_PREFIX').Trim()
+        $all = & C:\msys64\usr\bin\bash -lc 'pacman -Q'
+        if ($LASTEXITCODE -ne 0 -or -not $prefix) { throw "Could not list the packages of MSYSTEM=$env:MSYSTEM" }
+        $list = ($all | Where-Object { $_ -like "$prefix-*" -or $_ -match '^(autoconf\S*|automake\S*|libtool|m4|make) ' }) -join "`n"
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hash = -join ($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($list)) | ForEach-Object { $_.ToString("x2") })
+        echo "hash of $(($list -split "`n").Count) of $($all.Count) installed packages ($prefix-* and autotools): $hash"
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "hash=$hash" -Encoding ascii
+
+    # Only an exact key restores this cache: any change of the sources which
+    # define the configure checks and options, of the CI recipe, or of the
+    # installed packages means a "configure" from scratch (and a new cache)
+    - name: Restore cache of configure results
+      id: cache-autoconf
+      uses: actions/cache/restore@v6
+      with:
+        path: 'C:\nut-ci\autoconf'
+        key: mingw32-autoconf-${{ hashFiles('configure.ac', 'm4/**', 'autogen.sh', 'ci_build.sh', 'scripts/Windows/build-mingw-prereqs.sh', '.github/workflows/09-windows-mingw32.yml', '.github/scripts/appveyor/02-install.bat', '.github/scripts/appveyor/03-before_build.bat', '.github/scripts/appveyor/04-build_script.bat') }}-${{ steps.pkgs.outputs.hash }}
+
+    - name: "03: build prerequisites not packaged for MINGW32"
+      id: prereqs
+      shell: cmd
+      run: call .github\scripts\appveyor\03-before_build.bat
+
+    - name: "04: build NUT"
+      id: build
+      shell: cmd
+      run: call .github\scripts\appveyor\04-build_script.bat
+
+    - name: "05: ccache statistics"
+      shell: cmd
+      run: call .github\scripts\appveyor\05-after_build.bat
+
+    - name: "07: make check (and spellcheck)"
+      shell: cmd
+      run: call .github\scripts\appveyor\07-test_script.bat
+
+    - name: "08: bundle and archive NUT for Windows"
+      shell: cmd
+      run: call .github\scripts\appveyor\08-after_test.bat
+
+    - name: "12: clean up ccache before saving it, report statistics"
+      shell: powershell
+      run: '& .github\scripts\appveyor\12-on_success.ps1'
+
+    - name: Upload the bundle archive
+      id: upload-bundle
+      uses: actions/upload-artifact@v7
+      with:
+        name: NUT-for-Windows-i686-SNAPSHOT
+        path: NUT-for-Windows-i686-SNAPSHOT-*.7z
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Upload the debug information archive
+      id: upload-debuginfo
+      uses: actions/upload-artifact@v7
+      with:
+        name: NUT-debuginfo-for-Windows-i686-SNAPSHOT
+        path: NUT-debuginfo-for-Windows-i686-SNAPSHOT-*.7z
+        if-no-files-found: error
+        retention-days: 14
+
+    # The caches are saved also when later steps (e.g. tests) failed, as soon
+    # as the steps which fill them succeeded (like APPVEYOR_SAVE_CACHE_ON_ERROR
+    # for master branch builds in appveyor.yml); ccache after any build attempt
+    # (04-build_script.bat enforces its max_size also when the build failed)
+    - name: Save cache of MSYS2 packages
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.install.outcome == 'success' && steps.cache-pacman.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\msys64\var\cache\pacman\pkg'
+        key: ${{ steps.cache-pacman.outputs.cache-primary-key }}
+
+    - name: Save cache of prerequisites built from sources
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.prereqs.outcome == 'success' && steps.cache-deps.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\nut-ci\nut-win-deps'
+        key: ${{ steps.cache-deps.outputs.cache-primary-key }}
+
+    - name: Save cache of ccache
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\nut-ci\ccache'
+        key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
+
+    # After a successful build only, so that a configure which failed
+    # (perhaps due to its cached results) does not get cached
+    - name: Save cache of configure results
+      if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.build.outcome == 'success' && steps.cache-autoconf.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: 'C:\nut-ci\autoconf'
+        key: ${{ steps.cache-autoconf.outputs.cache-primary-key }}
+
+    # Step durations, cache and ccache statistics and archive sizes, also
+    # (especially) for failed builds
+    - name: Report build statistics in the job summary
+      if: ${{ !cancelled() }}
+      shell: powershell
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CACHE_PACMAN_HIT: ${{ steps.cache-pacman.outputs.cache-hit }}
+        CACHE_PACMAN_KEY: ${{ steps.cache-pacman.outputs.cache-matched-key }}
+        CACHE_PACMAN_PATH: 'C:\msys64\var\cache\pacman\pkg'
+        CACHE_DEPS_HIT: ${{ steps.cache-deps.outputs.cache-hit }}
+        CACHE_DEPS_KEY: ${{ steps.cache-deps.outputs.cache-matched-key }}
+        CACHE_DEPS_PATH: 'C:\nut-ci\nut-win-deps'
+        CACHE_CCACHE_HIT: ${{ steps.cache-ccache.outputs.cache-hit }}
+        CACHE_CCACHE_KEY: ${{ steps.cache-ccache.outputs.cache-matched-key }}
+        CACHE_CCACHE_PATH: 'C:\nut-ci\ccache'
+        CACHE_AUTOCONF_HIT: ${{ steps.cache-autoconf.outputs.cache-hit }}
+        CACHE_AUTOCONF_KEY: ${{ steps.cache-autoconf.outputs.cache-matched-key }}
+        CACHE_AUTOCONF_PATH: 'C:\nut-ci\autoconf'
+        ARTIFACT_BUNDLE_URL: ${{ steps.upload-bundle.outputs.artifact-url }}
+        ARTIFACT_DEBUGINFO_URL: ${{ steps.upload-debuginfo.outputs.artifact-url }}
+      run: '& .github\scripts\windows-gha-summary.ps1'

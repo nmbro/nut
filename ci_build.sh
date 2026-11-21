@@ -256,6 +256,12 @@ normalize_path() {
 }
 
 propose_CI_CCACHE_SYMLINKDIR() {
+    # On MSYS2, prefer the current environment (e.g. /ucrt64, /clang64,
+    # /mingw64) over others which may also be installed:
+    if [ -n "${MSYSTEM_PREFIX-}" ]; then
+        echo "${MSYSTEM_PREFIX}/lib/ccache/bin"
+    fi
+
     # This is where many symlinks like "gcc -> ../bin/ccache" reside:
     echo \
         "/usr/lib/ccache" \
@@ -333,7 +339,8 @@ optional_prepare_ccache() {
             PATH="`echo \"$PATH\" | sed -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,' -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,'`"
         fi
         CCACHE_PATH="$PATH"
-        CCACHE_DIR="${HOME}/.ccache"
+        # Keep the location the caller (e.g. a CI recipe which caches it) set:
+        CCACHE_DIR="${CCACHE_DIR:-${HOME}/.ccache}"
         export CCACHE_PATH CCACHE_DIR PATH
         HAVE_CCACHE=no
         if (command -v ccache || which ccache) \
@@ -1204,7 +1211,13 @@ autogen_get_CONFIGURE_SCRIPT() {
         # FIXME later: any hash would do to detect changes
         # Paths below assume SCRIPTDIR (of ci_build.sh) is the source root
         AUTOCONF_FILES="`ls -1 \"${SCRIPTDIR}\"/configure.ac \"${SCRIPTDIR}\"/m4/*.m4 | sort`"
-        AUTOCONF_HASH="$({ cat ${AUTOCONF_FILES} ; uname -a ; } | somehash_filter)" \
+        # The OS details without the host name (POSIX "uname -n", part of
+        # "uname -a"), so that a cache can be shared by equivalent hosts,
+        # e.g. the ever-renamed GitHub Actions runners; a CI recipe which
+        # tracks the relevant changes otherwise (e.g. GHA-09 by the cache
+        # key, with the installed package versions) may set its own
+        # CI_CACHE_NUT_OS_ID instead (runner images differ in "uname -r -v"):
+        AUTOCONF_HASH="$({ cat ${AUTOCONF_FILES} ; if [ -n "${CI_CACHE_NUT_OS_ID-}" ] ; then echo "${CI_CACHE_NUT_OS_ID}" ; else uname -s -r -v -m ; fi ; } | somehash_filter)" \
         || AUTOCONF_HASH=''
 
         if [ -n "${AUTOCONF_HASH}" ]; then
@@ -1281,6 +1294,26 @@ configure_CI_BUILDDIR() {
     fi
 }
 
+# GitHub Actions folds the log lines between these markers into a collapsed
+# section with the given title; groups do not nest, so ci_group() closes an
+# open one first. Elsewhere (e.g. AppVeyor, Jenkins) these print nothing.
+# Note: a group opened in a sub-shell must be closed in that sub-shell.
+CI_GROUP_OPEN=false
+ci_group() {
+    ci_endgroup
+    if [ x"${GITHUB_ACTIONS-}" = xtrue ] ; then
+        echo "::group::$*"
+        CI_GROUP_OPEN=true
+    fi
+}
+
+ci_endgroup() {
+    if [ x"${CI_GROUP_OPEN-}" = xtrue ] ; then
+        echo "::endgroup::"
+        CI_GROUP_OPEN=false
+    fi
+}
+
 configure_nut() {
     configure_CI_BUILDDIR
 
@@ -1302,6 +1335,7 @@ configure_nut() {
 
     CI_CACHE_NUT_RETRIED=false
     while : ; do # Note the CI_SHELL_IS_FLAKY=true support below
+      ci_group "Configure NUT: $CONFIGURE_SCRIPT"
       echo "=== CONFIGURING NUT: $CONFIGURE_SCRIPT ${CONFIG_OPTS_STR}"
       echo "=== CC='$CC' CXX='$CXX' CPP='$CPP'"
       echo "=== PATH='$PATH'"
@@ -1356,8 +1390,9 @@ configure_nut() {
                     ;;
             esac
         fi
-      } && return 0 \
+      } && { ci_endgroup ; return 0 ; } \
       || { RES_CFG=$?
+        ci_endgroup
         echo "$0: configure phase complete ($RES_CFG)" >&2
         if [ -n "${CI_CACHE_NUT_HASHDIR_CFG_OPT}" ] && [ -s "${CI_CACHE_NUT_HASHDIR_CFG}/config.cache" ] ; then
             if ${EGREP} "run 'make distclean' and/or 'rm .*config.cache" config.log ; then
@@ -1403,8 +1438,11 @@ build_to_only_catch_errors_target() {
         build_to_only_catch_errors_target all ; return $?
     fi
 
-    # Sub-shells to avoid crashing with "unhandled" faults in "set -e" mode:
-    ( echo "`date`: Starting the parallel build attempt (quietly to build what we can) for '$@' ..."; \
+    # Sub-shells to avoid crashing with "unhandled" faults in "set -e" mode;
+    # a failed parallel attempt is followed by a sequential one, which shows
+    # the remaining errors outside of the (folded) log group:
+    ( ci_group "Parallel build attempt for '$*'"
+      echo "`date`: Starting the parallel build attempt (quietly to build what we can) for '$*' ..."; \
       if [ -n "$PARMAKE_FLAGS" ]; then
         echo "For parallel builds, '$PARMAKE_FLAGS' options would be used"
       fi
@@ -1422,7 +1460,10 @@ build_to_only_catch_errors_target() {
           $CI_TIME $MAKE $MAKE_FLAGS_VERBOSE -k $PARMAKE_FLAGS "$@" ;;
         default)
           $CI_TIME $MAKE -k $PARMAKE_FLAGS "$@" ;;
-      esac ) && echo "`date`: SUCCESS" ; ) || \
+      esac ) && echo "`date`: SUCCESS"
+      RES_PAR=$?
+      ci_endgroup
+      exit $RES_PAR ; ) || \
     ( RET=$?
       if [ "$CI_FAILFAST" = true ]; then
         echo "===== Aborting after parallel build attempt failure for '$*' because CI_FAILFAST=$CI_FAILFAST" >&2
@@ -3245,7 +3286,8 @@ bindings)
     if [ x"${CI_CCACHE_USE-}" != xno ] && [ -n "${CI_CCACHE_SYMLINKDIR}" ] && [ -d "${CI_CCACHE_SYMLINKDIR}" ] ; then
         PATH="`echo \"$PATH\" | sed -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,' -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,'`"
         CCACHE_PATH="$PATH"
-        CCACHE_DIR="${HOME}/.ccache"
+        # Keep the location the caller (e.g. a CI recipe which caches it) set:
+        CCACHE_DIR="${CCACHE_DIR:-${HOME}/.ccache}"
         if (command -v ccache || which ccache) && ls -la "${CI_CCACHE_SYMLINKDIR}" && mkdir -p "${CCACHE_DIR}"/ ; then
             echo "INFO: Using ccache via PATH preferring tool names in ${CI_CCACHE_SYMLINKDIR}" >&2
             PATH="${CI_CCACHE_SYMLINKDIR}:$PATH"
@@ -3407,33 +3449,15 @@ bindings)
     fi
 
     # If detect_platform_PKG_CONFIG_PATH_and_FLAGS() customized anything here,
-    # let configure script know
-    _EXPORT_FLAGS=true
-    case "${CI_OS_NAME}" in
-        windows-msys2)
-            if [ "$HAVE_CCACHE" = yes ] ; then
-                # NO-OP: Its ccache gets confused, apparently parsing the flags as one parameter
-                #   configure:6064: checking whether the C compiler works
-                #   configure:6086: /mingw64/lib/ccache/bin/gcc  -D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_WIN32_WINNT=0xffff   conftest.c  >&5
-                #   Cannot create temporary file in C:\msys64\home\abuild\nut-win\ -D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_WIN32_WINNT=0xffff\: No such file or directory
-                # FIXME: Detect better if this bites us on the current system?
-                _EXPORT_FLAGS=false
-            fi
-            ;;
-    esac
-
-    if [ "${_EXPORT_FLAGS}" = true ] ; then
-        [ -z "${CFLAGS}" ]   || export CFLAGS
-        [ -z "${CXXFLAGS}" ] || export CXXFLAGS
-        [ -z "${CPPFLAGS}" ] || export CPPFLAGS
-        [ -z "${LDFLAGS}" ]  || export LDFLAGS
-    else
-        # NOTE: Passing via CONFIG_OPTS also fails
-        [ -z "${CFLAGS}" ]   || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export CFLAGS='${CFLAGS}'" >&2
-        [ -z "${CXXFLAGS}" ] || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export CXXFLAGS='${CXXFLAGS}'" >&2
-        [ -z "${CPPFLAGS}" ] || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export CPPFLAGS='${CPPFLAGS}'" >&2
-        [ -z "${LDFLAGS}" ]  || echo "WARNING: SKIP: On '${CI_OS_NAME}' with ccache used, can not export LDFLAGS='${LDFLAGS}'" >&2
-    fi
+    # let configure script know.
+    # NOTE: On MSYS2 this used to be skipped when ccache was used, due to
+    #   Cannot create temporary file in C:\...\ -D_POSIX=1 ...\: No such file or directory
+    # errors from the compiler; that was caused by the configure script itself
+    # (NUT_STASH_WARNINGS used the exported TMP variable for scratch), fixed.
+    [ -z "${CFLAGS}" ]   || export CFLAGS
+    [ -z "${CXXFLAGS}" ] || export CXXFLAGS
+    [ -z "${CPPFLAGS}" ] || export CPPFLAGS
+    [ -z "${LDFLAGS}" ]  || export LDFLAGS
 
     PATH="`echo \"${PATH}\" | normalize_path`"
     CCACHE_PATH="`echo \"${CCACHE_PATH}\" | normalize_path`"
@@ -3453,7 +3477,14 @@ bindings)
     fi
 
     #$MAKE all || \
-    $MAKE $PARMAKE_FLAGS all-quick || exit
+    ci_group "Build NUT: $MAKE $PARMAKE_FLAGS all-quick"
+    $MAKE $PARMAKE_FLAGS all-quick || {
+        RES_MAKE=$?
+        ci_endgroup
+        echo "FATAL: FAILED ($RES_MAKE) to $MAKE all-quick, see the build log (group) above" >&2
+        exit $RES_MAKE
+    }
+    ci_endgroup
     build_to_only_catch_errors_check
     ### if [ "${CI_SKIP_CHECK}" != true ] ; then $MAKE check || exit ; fi
 
@@ -3479,7 +3510,7 @@ bindings)
 # Note that semi-native builds with e.g. MSYS2 on Windows should "just work" as
 # on any other supported platform (more details in docs/config-prereqs.txt).
 cross-windows-mingw*)
-    echo "INFO: When using build-mingw-nut.sh consider 'export INSTALL_WIN_BUNDLE=true' to use mainstream DLL co-bundling recipe" >&2
+    echo "INFO: build-mingw-nut.sh uses the mainstream DLL co-bundling recipe ('make install-win-bundle') unless INSTALL_WIN_BUNDLE=false" >&2
 
     if [ "$HAVE_CCACHE" = yes ] \
     && [ x"${CI_CCACHE_USE-}" != xno ] \
@@ -3488,7 +3519,8 @@ cross-windows-mingw*)
     ; then
         PATH="`echo \"$PATH\" | sed -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?:,,' -e 's,:'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,' -e 's,^'\"${CI_CCACHE_SYMLINKDIR}\"'/?$,,'`"
         CCACHE_PATH="$PATH"
-        CCACHE_DIR="${HOME}/.ccache"
+        # Keep the location the caller (e.g. a CI recipe which caches it) set:
+        CCACHE_DIR="${CCACHE_DIR:-${HOME}/.ccache}"
         if (command -v ccache || which ccache) && ls -la "${CI_CCACHE_SYMLINKDIR}" && mkdir -p "${CCACHE_DIR}"/ ; then
             echo "INFO: Using ccache via PATH preferring tool names in ${CI_CCACHE_SYMLINKDIR}" >&2
             PATH="${CI_CCACHE_SYMLINKDIR}:$PATH"

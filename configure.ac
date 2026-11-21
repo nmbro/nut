@@ -3296,9 +3296,22 @@ dnl NOTE: Do not confuse libglib{2} (GNOME) with glibc (part of compiler)
 dnl ----------------------------------------------------------------------
 
 AC_MSG_CHECKING([whether to build nut-upower driver and nut-scanner support])
+nut_upower_skipped_platform=""
 AS_IF([test "${nut_have_libglib}${nut_have_libgio}" = "yesyes"], [
 	AS_CASE(["${nut_with_upower}"],
-		[yes|auto], [nut_with_upower=yes]
+		[yes], [nut_with_upower=yes],
+		[auto], [
+			dnl UPower is a D-Bus system service (upowerd) of Linux and BSD
+			dnl desktops; native Windows has neither, even if GLib/GIO are
+			dnl available (e.g. in MSYS2), so do not build it there by default
+			AS_CASE(["${target_os}"],
+				[*mingw*], [
+					nut_with_upower=no
+					nut_upower_skipped_platform="${target_os}"
+				],
+				[nut_with_upower=yes]
+			)
+		]
 	)
 ], [
 	AS_CASE(["${nut_with_upower}"],
@@ -3309,6 +3322,8 @@ AS_IF([test "${nut_have_libglib}${nut_have_libgio}" = "yesyes"], [
 ])
 
 AC_MSG_RESULT(${nut_with_upower})
+AS_IF([test -n "${nut_upower_skipped_platform}"],
+	[AC_MSG_NOTICE([Not building UPower support by default for '${nut_upower_skipped_platform}': UPower is a D-Bus service which this platform lacks; use --with-upower=yes to build it anyway])])
 NUT_REPORT_DRIVER([build UPower driver and nut-scanner support],
 			[${nut_with_upower}], [],
 			[WITH_UPOWER], [Define to build UPower driver and nut-scanner support])
@@ -5724,7 +5739,7 @@ return res ? 0 : 1;
      my_CXXFLAGS="$CXXFLAGS"
      my_LDFLAGS="$LDFLAGS"
      my_LIBS="$LIBS"
-     CXXFLAGS="$myCXXFLAGS $pkg_cv_CPPUNIT_CFLAGS $pkg_cv_CPPUNIT_CXXFLAGS"
+     CXXFLAGS="$my_CXXFLAGS $pkg_cv_CPPUNIT_CFLAGS $pkg_cv_CPPUNIT_CXXFLAGS"
      LDFLAGS="$my_LDFLAGS $pkg_cv_CPPUNIT_LDFLAGS"
      LIBS="$my_LIBS $pkg_cv_CPPUNIT_LIBS"
      AC_LANG_PUSH([C++])
@@ -6742,22 +6757,12 @@ AS_CASE(["${nut_enable_warnings}"],
         ]
 )
 
-AS_IF([test x"${nut_enable_warnings}" != xno || test x"${nut_enable_Werror}" != xno],
-    [AS_IF([test "x${CLANGCC}" = "xyes" || test "x${GCC}" = "xyes"],
-        [AS_CASE(["${target_os}"],
-            [*mingw*], [
-                AC_MSG_NOTICE(
-[GCC on WIN32 builds warns about '%lld' etc. via PRId64 etc.
-even though modern libraries support long-long printing
-in practice (older ones did not - hence the warning).
-Forcing "-Wno-format" into warnings options.
-])
-                CFLAGS="${CFLAGS} -Wno-format"
-                CXXFLAGS="${CXXFLAGS} -Wno-format"
-            ]
-        )
-    ])
-])
+dnl NOTE: MinGW builds used to force "-Wno-format", as GCC checked the
+dnl printf-like methods of NUT by the rules of the old MSVCRT (e.g. no
+dnl "%lld" via PRId64), while NUT for Windows uses a C99 printf() (of
+dnl the UCRT, or of MinGW-w64 itself). Now include/attribute.h declares
+dnl them with the format archetype of the printf() really used (see
+dnl NUT_ATTR_FORMAT_PRINTF), so format strings are checked there too.
 
 dnl ---------------------------------------------------------------------
 AC_MSG_CHECKING([whether to make warnings fatal])

@@ -68,4 +68,22 @@
  * as usual, and not bother about 0/1 values of the macro as well.
  */
 
+/* The archetype for the format checks of printf-like methods, as in
+ * __attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3))):
+ * MinGW-w64 GCC checks "__printf__" by the rules of the old MSVCRT (e.g.
+ * no "%lld"), while NUT for Windows uses the C99 printf() of the UCRT or
+ * of MinGW-w64 itself (__USE_MINGW_ANSI_STDIO, enabled e.g. for C99 and
+ * POSIX builds), which its <stdio.h> declares with __MINGW_PRINTF_FORMAT.
+ */
+#ifndef NUT_ATTR_FORMAT_PRINTF
+# ifdef __MINGW32__
+#  include <stdio.h>
+# endif
+# ifdef __MINGW_PRINTF_FORMAT
+#  define NUT_ATTR_FORMAT_PRINTF __MINGW_PRINTF_FORMAT
+# else
+#  define NUT_ATTR_FORMAT_PRINTF __printf__
+# endif
+#endif
+
 #endif /* NUT_ATTRIBUTE_H_SEEN */

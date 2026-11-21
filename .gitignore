@@ -9,6 +9,7 @@
 .deps/
 .libs/
 .inst/
+.inst-debuginfo/
 /tmp/
 /obj/
 /_install_pkgprotodir/

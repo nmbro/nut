@@ -46,6 +46,15 @@
 /* These use-cases need to be revised, maybe hushed later: */
 #define NUT_WIN32_INCOMPLETE_MAYBE_NOT_APPLICABLE()	NUT_WIN32_INCOMPLETE_DETAILED("may be not applicable to the platform")
 
+/* Printing formats for DWORD (an "unsigned long", 32 bits on all Windows
+ * builds), e.g. for GetLastError() codes: "code %" PRIuDWORD */
+#ifndef PRIuDWORD
+# define PRIuDWORD "lu"
+#endif
+#ifndef PRIxDWORD
+# define PRIxDWORD "lx"
+#endif
+
 /* This value is defined in the error.h file of the libusb-win32 sources
  * FIXME: Should only be relevant for builds WITH_LIBUSB_0_1 - #ifdef it so?
  * Conflicts with e.g. /msys64/mingw64/include/errno.h which defines it as 138
@@ -58,7 +67,7 @@
 typedef const char * uid_t;
 struct passwd {
 	const char		*pw_name;
-	int			pw_uid;	/* Fake value, alwaus set to 0 */
+	int			pw_uid;	/* Fake value, always set to 0 */
 };
 
 uid_t getuid(void);
@@ -66,7 +75,7 @@ struct passwd *getpwuid(uid_t uid);
 char *getpass( const char *prompt);
 
 #define system(a) win_system(a)
-#define sleep(n) Sleep(1000 * n)
+#define sleep(n) Sleep(1000 * (n))
 char * strtok_r(char *str, const char *delim, char **saveptr);
 char * filter_path(const char * source);
 
@@ -117,15 +126,7 @@ int sktclose(int fh);
  * People who see the warning should however fix their build environment
  * and use the native OS-provided implementation ;)
  */
-# if (0)
-/* Some old winapi? or just sloppy original commits?
- * Why is this here at all if there's something per ws2tcpip.h -
- * maybe should be configure-detected?
- */
-const char* inet_ntop(int af, const void* src, char* dst, int cnt);
-# else
 const char* inet_ntop(int af, const void* src, char* dst, size_t /* socklen_t */ cnt);
-# endif
 #endif
 
 #if ! HAVE_INET_PTON
@@ -170,7 +171,7 @@ extern OVERLAPPED pipe_connection_overlapped;
 void pipe_create(const char * pipe_name);
 /* The caller must free the returned ACL after creating the pipe. */
 PACL init_pipe_security(SECURITY_ATTRIBUTES *sa, SECURITY_DESCRIPTOR *sd);
-void pipe_connect();
+void pipe_connect(void);
 void pipe_disconnect(pipe_conn_t *conn);
 int pipe_ready(pipe_conn_t *conn);
 int send_to_named_pipe(const char * pipe_name, const char * data);

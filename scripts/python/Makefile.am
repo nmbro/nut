@@ -107,6 +107,13 @@ done ; \
 # Craft locale subdirs with "xx_YY.UTF-8" patterned names,
 # and similarly alias the "*.po" files inside, as needed
 # by some platforms but not others to find these files.
+# NOTE: LN_S may be "cp -pR" (e.g. configure picks it for MinGW builds),
+# so the "*.po" alias is only made if its source file is actually installed
+# (only the "*.mo" files are, currently), and from inside the language
+# directory, so the source name resolves the same way for "ln -s" (relative
+# to the link) and "cp" (relative to current directory). The "xx_YY.UTF-8"
+# alias may then be a directory copy, so it is removed with "rm -rf" (which
+# only removes the link itself, if it is a symlink).
 install-data-hook-app-locale-symlinks:
 	@cd "$(DESTDIR)$(nutmonitordir)/app/locale" || exit ; \
 	 $(DEF_TOUPPER) ; \
@@ -114,8 +121,10 @@ install-data-hook-app-locale-symlinks:
 	    UTF8_NAME="$$L"_"`echo \"$$L\" | $${TOUPPER}`".UTF-8 || exit ; \
 	    UTF8_POFILE="$${L}/$${UTF8_NAME}.po" || exit ; \
 	    UTF8_SUBDIR="$${UTF8_NAME}" || exit ; \
-	    rm -f "$${UTF8_POFILE}" || true ; rm -f "$${UTF8_SUBDIR}" || true ; \
-	    $(LN_S) "$$L".po "$${UTF8_POFILE}" || exit ; \
+	    rm -f "$${UTF8_POFILE}" || true ; rm -rf "$${UTF8_SUBDIR}" || true ; \
+	    if test -e "$$L/$$L.po" ; then \
+	        ( cd "$$L" && $(LN_S) "$$L".po "$${UTF8_NAME}.po" ) || exit ; \
+	    fi ; \
 	    $(LN_S) "$$L" "$${UTF8_SUBDIR}" || exit ; \
 	 done
 
@@ -128,7 +137,7 @@ uninstall-hook-app-locale-symlinks:
 	    UTF8_POFILE="$${L}/$${UTF8_NAME}.po" || exit ; \
 	    UTF8_SUBDIR="$${UTF8_NAME}" || exit ; \
 	    rm -f "$${UTF8_POFILE}" || RES=$$? ; \
-	    rm -f "$${UTF8_SUBDIR}" || RES=$$? ; \
+	    rm -rf "$${UTF8_SUBDIR}" || RES=$$? ; \
 	 done ; \
 	 exit $$RES
 

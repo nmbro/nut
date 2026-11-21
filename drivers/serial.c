@@ -104,7 +104,7 @@ static void lock_set(TYPE_FD_SER fd, const char *port)
 #ifndef WIN32
 		fatal_with_errno(EXIT_FAILURE, "lock_set: programming error: fd = %d", fd);
 #else	/* WIN32 */
-		fatal_with_errno(EXIT_FAILURE, "lock_set: programming error: struct = %p", fd);
+		fatal_with_errno(EXIT_FAILURE, "lock_set: programming error: struct = %p", (void *)fd);
 #endif	/* WIN32 */
 	}
 
@@ -321,7 +321,7 @@ int ser_close(TYPE_FD_SER fd, const char *port)
 #ifndef WIN32
 		fatal_with_errno(EXIT_FAILURE, "ser_close: programming error: fd=%d port=%s", fd, port);
 #else	/* WIN32 */
-		fatal_with_errno(EXIT_FAILURE, "ser_close: programming error: struct=%p port=%s", fd, port);
+		fatal_with_errno(EXIT_FAILURE, "ser_close: programming error: struct=%p port=%s", (void *)fd, port);
 #endif	/* WIN32 */
 	}
 

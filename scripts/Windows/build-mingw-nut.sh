@@ -127,10 +127,20 @@ out-of-tree)
 	;;
 esac
 
+# The main NUT Makefile recipe for DLL co-bundling ("make install-win-bundle")
+# is the maintained one: the built-in logic below (INSTALL_WIN_BUNDLE=false)
+# is legacy, e.g. it does not prune nor strip the bundle.
 if [ -z "$INSTALL_WIN_BUNDLE" ]; then
-	echo "NOTE: You might want to export INSTALL_WIN_BUNDLE=true to use main NUT Makefile"
-	echo "recipe for DLL co-bundling (default: false to use logic maintained in $0"
+	INSTALL_WIN_BUNDLE=true
+	echo "NOTE: Using the main NUT Makefile recipe for DLL co-bundling (export INSTALL_WIN_BUNDLE=false"
+	echo "for the legacy logic of $0)"
 fi >&2
+
+# The compilers and binutils, and their prefix for headers, libraries and
+# DLLs, are named after TOOLCHAIN (default: the ARCH host triplet). E.g.
+# for the UCRT toolchain of Debian 13+, use "TOOLCHAIN=x86_64-w64-mingw32ucrt
+# ./build-mingw-nut.sh all64" (configure gets the usual host triplet).
+[ -n "${TOOLCHAIN-}" ] || TOOLCHAIN="$ARCH"
 
 configure_nut() {
 	USE_AUTOCONF_CACHE_FLAG=""
@@ -185,18 +195,28 @@ do_build_mingw_nut() {
 	# but this version is very Debian specific!!!
 	# FIXME: find something more generic
 	BUILD_FLAG="--build=`dpkg-architecture -qDEB_BUILD_GNU_TYPE`"
-	export CC="$ARCH-gcc"
-	export CXX="$ARCH-g++"
+	export CC="$TOOLCHAIN-gcc"
+	export CXX="$TOOLCHAIN-g++"
+	# Named after the host triplet otherwise, which differs for e.g. UCRT
+	if [ x"$TOOLCHAIN" != x"$ARCH" ] ; then
+		export AR="$TOOLCHAIN-ar" RANLIB="$TOOLCHAIN-ranlib" \
+			NM="$TOOLCHAIN-nm" STRIP="$TOOLCHAIN-strip" \
+			OBJDUMP="$TOOLCHAIN-objdump" OBJCOPY="$TOOLCHAIN-objcopy" \
+			DLLTOOL="$TOOLCHAIN-dlltool" \
+			RC="$TOOLCHAIN-windres" WINDRES="$TOOLCHAIN-windres" \
+			WINDMC="$TOOLCHAIN-windmc"
+	fi
 
 	# TODO: Detect/parameterize?
 	#  This prefix is currently valid for mingw packaging in Debian/Ubuntu.
-	ARCH_PREFIX="/usr/$ARCH"
+	#  Its "bin" in PATH also lets the bundle recipes find the DLLs there.
+	ARCH_PREFIX="/usr/$TOOLCHAIN"
 	export PATH="${ARCH_PREFIX}/bin:$PATH"
 
 	# Note: _WIN32_WINNT>=0x0600 is needed for inet_ntop in mingw headers
 	# and the value 0xffff is anyway forced into some components at least
 	# by netsnmp cflags.
-	# _POSIX_THREAD_SAFE_FUNCTIONS whould help with localtime_r() gmtime_r()
+	# _POSIX_THREAD_SAFE_FUNCTIONS would help with localtime_r() gmtime_r()
 	# on recent mingw releases (as of 2019), per
 	# https://stackoverflow.com/questions/18551409/localtime-r-support-on-mingw
 	export CFLAGS+=" -D_POSIX=1 -D_POSIX_C_SOURCE=200112L -D_POSIX_THREAD_SAFE_FUNCTIONS=200112L -I${ARCH_PREFIX}/include/ -D_WIN32_WINNT=0xffff"
@@ -289,6 +309,14 @@ do_build_mingw_nut() {
 		# Legacy code from when NUT for Windows effort started;
 		# there is no plan to maintain it much (this script is PoC):
 		echo "NOTE: INSTALL_WIN_BUNDLE!=true so using built-in logic for DLL co-bundling" >&2
+
+		# dllldd.sh was sourced before CC, CXX and PATH were set above:
+		# look for the compiler-provided DLLs (libgcc_s_*, libstdc++)
+		# and the DLL search path again, now that they are known
+		discover_COMPILER_PATHS
+		discover_TC_PREFIX_DIR
+		# shellcheck disable=SC2034 # used by the methods of dllldd.sh
+		SEARCH_DLL_PATH="`cherrypick_MSYS_DLL_PATH`"
 
 		make install DESTDIR="${INSTALL_DIR}" || exit
 

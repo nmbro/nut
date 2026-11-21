@@ -67,7 +67,13 @@
 #  define PRIuSIZE PRIsize
 # else
 #  if defined(__MINGW32__) || defined (WIN32)
-#   define PRIuSIZE "llu"
+/* Windows is LLP64: size_t is 64 bits on WIN64, but 32 bits on WIN32,
+ * where "%llu" would consume two arguments and misalign the rest */
+#   ifdef _WIN64
+#    define PRIuSIZE "llu"
+#   else
+#    define PRIuSIZE "u"
+#   endif
 #  else
 #   if (defined HAVE_PRINTF_ZU) && HAVE_PRINTF_ZU
 #    define PRIuSIZE "zu"
@@ -95,7 +101,12 @@
 
 #ifndef PRIxSIZE
 # if defined(__MINGW32__) || defined (WIN32)
-#  define PRIxSIZE "llx"
+/* See PRIuSIZE comment above */
+#  ifdef _WIN64
+#   define PRIxSIZE "llx"
+#  else
+#   define PRIxSIZE "x"
+#  endif
 # else
 #  if (defined HAVE_PRINTF_ZU) && HAVE_PRINTF_ZU
 #   define PRIxSIZE "zx"
@@ -128,7 +139,12 @@
 #   define PRIiSIZE PRIdSIZE
 #  else
 #   if defined(__MINGW32__) || defined (WIN32)
-#    define PRIiSIZE "lld"
+/* See PRIuSIZE comment above */
+#    ifdef _WIN64
+#     define PRIiSIZE "lld"
+#    else
+#     define PRIiSIZE "d"
+#    endif
 #   else
 #    if (defined HAVE_PRINTF_ZU) && HAVE_PRINTF_ZU
 #     define PRIiSIZE "zd"

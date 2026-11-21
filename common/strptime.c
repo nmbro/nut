@@ -409,16 +409,19 @@ recurse:
 #endif
 				bp += 3;
 			} else {
+				/* Use the CRT accessor macros (_tzname, _timezone)
+				 * rather than the tzname/timezone variables, which
+				 * MinGW-w64 marks deprecated when linking to UCRT */
 				ep = find_string(bp, &i,
-					(const char * const *)tzname,
+					(const char * const *)_tzname,
 					NULL, 2);
 				if (ep != NULL) {
 					tm->tm_isdst = i;
 #ifdef TM_GMTOFF
-					tm->TM_GMTOFF = -(timezone);
+					tm->TM_GMTOFF = -(_timezone);
 #endif
 #ifdef TM_ZONE
-					tm->TM_ZONE = tzname[i];
+					tm->TM_ZONE = _tzname[i];
 #endif
 				}
 				bp = ep;

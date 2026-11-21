@@ -75,7 +75,7 @@ void listen_add(const char *addr, const char *port);
 
 void kick_login_clients(const char *upsname);
 int sendback(nut_ctype_t *client, const char *fmt, ...)
-	__attribute__ ((__format__ (__printf__, 2, 3)));
+	__attribute__ ((__format__ (NUT_ATTR_FORMAT_PRINTF, 2, 3)));
 int send_err(nut_ctype_t *client, const char *errtype);
 int send_err_extra(nut_ctype_t *client, const char *errtype, const char *extra);
 

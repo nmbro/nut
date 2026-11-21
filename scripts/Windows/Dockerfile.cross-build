@@ -1,0 +1,85 @@
+# Container images for cross-building NUT for Windows on Linux, as described
+# in scripts/Windows/README.adoc ("Cross-building on Linux"). The build
+# context is this directory (only build-mingw-prereqs.sh is used from it), so
+# from the top of the NUT source tree:
+#
+#   Ubuntu 24.04 (MSVCRT toolchains for 32-bit and 64-bit builds):
+#     docker build -f scripts/Windows/Dockerfile.cross-build --target wine \
+#       -t nut-xwin:ubuntu24.04 scripts/Windows
+#   Debian 13 (also the UCRT toolchain, for 64-bit UCRT builds):
+#     docker build -f scripts/Windows/Dockerfile.cross-build --target wine \
+#       --build-arg BASE=debian:trixie \
+#       --build-arg EXTRA_PKGS="gcc-mingw-w64-ucrt64 g++-mingw-w64-ucrt64" \
+#       -t nut-xwin:trixie scripts/Windows
+#
+# Stages (pick one with --target):
+# * build:   the toolchains and tools to build NUT and its prerequisites;
+# * wine:    the above, plus Wine to check that the results start;
+# * prereqs: the above, plus the NUT prerequisites built and installed for
+#            one target (see the end of this file).
+#
+# The package layers are cached by Docker, so re-building the images is quick
+# unless this file changes. NUT sources and build results stay outside the
+# image: bind-mount a source tree, e.g. at /src (see README.adoc).
+
+ARG BASE=ubuntu:24.04
+FROM ${BASE} AS build
+
+ARG EXTRA_PKGS=""
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The packages listed by README.adoc for cross-builds (git and certificates
+# to fetch the custom libmodbus of NUT)
+RUN apt-get update \
+ && apt-get install -y \
+	mingw-w64 libz-mingw-w64-dev ${EXTRA_PKGS} \
+	autoconf automake libtool pkgconf make python3 perl curl patch \
+	xz-utils dpkg-dev git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# ccache, used through its compiler symlinks (also for the MinGW cross
+# compilers): mount a volume at /ccache to keep the cache between containers
+RUN apt-get update \
+ && apt-get install -y ccache \
+ && rm -rf /var/lib/apt/lists/*
+ENV PATH=/usr/lib/ccache:${PATH} CCACHE_DIR=/ccache
+
+# Wine to run the built programs (64-bit, and 32-bit via the i386 packages)
+FROM build AS wine
+RUN dpkg --add-architecture i386 \
+ && apt-get update \
+ && apt-get install -y wine wine64 wine32:i386 \
+ && rm -rf /var/lib/apt/lists/*
+
+# The NUT prerequisites built into the image for one target, so containers for
+# NUT builds start with them installed. The layer stays cached until
+# build-mingw-prereqs.sh or a build argument changes; then it is re-built from
+# the sources. Downloads are kept in a BuildKit cache mount, one per base
+# image: the libmodbus checkout there has its autotools helper files as
+# symbolic links into the automake of the system which bootstrapped it.
+# Not for testing the prerequisites script itself: use "wine" then.
+#   64-bit MSVCRT (on the Ubuntu base, as above):
+#     docker build -f scripts/Windows/Dockerfile.cross-build --target prereqs \
+#       -t nut-xwin-prereqs:x86_64 scripts/Windows
+#   32-bit MSVCRT: the same, plus
+#       --build-arg PREREQ_ARCH=i686-w64-mingw32
+#   64-bit UCRT (on the Debian 13 base, as above), plus
+#       --build-arg PREREQ_TOOLCHAIN=x86_64-w64-mingw32ucrt
+FROM wine AS prereqs
+ARG BASE
+ARG PREREQ_ARCH=x86_64-w64-mingw32
+ARG PREREQ_TOOLCHAIN=""
+ARG PREREQ_MAKEFLAGS=-j8
+COPY build-mingw-prereqs.sh /opt/nut-prereqs/
+RUN --mount=type=cache,id=nut-win-deps-${BASE},target=/var/cache/nut-win-deps \
+    if [ -n "${PREREQ_TOOLCHAIN}" ] ; then \
+	T="${PREREQ_TOOLCHAIN}" ; \
+	export HOST_FLAG="--host=${PREREQ_ARCH}" \
+	    BUILD_FLAG="--build=`dpkg-architecture -qDEB_BUILD_GNU_TYPE`" \
+	    PREFIX="/usr/$T" CC="$T-gcc" CXX="$T-g++" AR="$T-ar" \
+	    RANLIB="$T-ranlib" RC="$T-windres" WINDRES="$T-windres" ; \
+    fi \
+ && ARCH="${PREREQ_ARCH}" DLDIR=/var/cache/nut-win-deps WSDIR=/tmp/nut-win-ws \
+    MAKEFLAGS="${PREREQ_MAKEFLAGS}" SUDO=" " WINEDEBUG=-all \
+    /opt/nut-prereqs/build-mingw-prereqs.sh \
+ && rm -rf /tmp/nut-win-ws /root/.wine
