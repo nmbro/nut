@@ -119,8 +119,12 @@ static int repeater_disable_strict_start = 0;
 void upsdrv_initinfo(void)
 {
 	dummy_info_t *item;
+	char annot_test[32];	/* TEST: CodeQL PR annotation check, do not merge */
 
 	upscli_upslog_set_debug_level(nut_debug_level, nut_common_cookie());
+
+	sprintf(annot_test, "%d", rand());
+	upsdebugx(5, "annotation test: %s", annot_test);
 
 	switch (mode)
 	{
